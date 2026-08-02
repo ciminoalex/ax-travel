@@ -93,8 +93,10 @@ export async function computeNextStops(
           estimated: false,
           straightLineM,
         }
-      } catch (e) {
-        if ((e as Error).name === 'AbortError') throw e
+      } catch {
+        // Qualunque motivo — rete, scadenza, annullamento — la tappa resta
+        // proponibile con una stima. Meglio un dato approssimato che una
+        // schermata che non si sblocca.
         return estimate(poi, straightLineM, walkPenalty)
       }
     }),

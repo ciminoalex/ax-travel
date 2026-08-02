@@ -41,10 +41,43 @@ export function getCurrentPosition(): Promise<LatLng> {
       reject(new Error('Geolocalizzazione non disponibile su questo browser'))
       return
     }
+
+    // Rete cellulare invece di GPS: per scegliere la prossima tappa bastano
+    // poche decine di metri, e in mezzo ai palazzi il fix GPS può non
+    // arrivare mai. maximumAge accetta una posizione recente già nota.
+    const options: PositionOptions = {
+      enableHighAccuracy: false,
+      timeout: 10000,
+      maximumAge: 120000,
+    }
+
+    let settled = false
+    const done = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      fn()
+    }
+
+    // iOS a volte non richiama né success né error (permesso mai deciso,
+    // tab in background): senza questa rete di sicurezza la schermata
+    // resta a caricare per sempre.
+    const guard = setTimeout(
+      () => done(() => reject(new Error('Il telefono non ha risposto alla richiesta di posizione.'))),
+      12000,
+    )
+
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      (err) => reject(new Error(geolocationMessage(err))),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 },
+      (pos) =>
+        done(() => {
+          clearTimeout(guard)
+          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        }),
+      (err) =>
+        done(() => {
+          clearTimeout(guard)
+          reject(new Error(geolocationMessage(err)))
+        }),
+      options,
     )
   })
 }

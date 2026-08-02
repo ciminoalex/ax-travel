@@ -29,6 +29,15 @@ type TflResponse = { journeys?: TflJourney[] }
 export class TflError extends Error {}
 
 /**
+ * Unisce l'annullamento del chiamante a una scadenza propria, così una
+ * richiesta che non torna non blocca l'interfaccia a tempo indeterminato.
+ */
+export function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
+  const timeout = AbortSignal.timeout(ms)
+  return signal ? AbortSignal.any([signal, timeout]) : timeout
+}
+
+/**
  * Tutte le alternative per un tragitto. La scelta di quale sia la migliore
  * NON avviene qui: spetta a journeyCost, così il criterio vive in un posto solo.
  */
@@ -48,9 +57,11 @@ export async function fetchJourneys(
 
   let res: Response
   try {
-    res = await fetch(url, { signal: opts.signal })
+    // Senza scadenza una richiesta lenta resta appesa per minuti e blocca
+    // la schermata: meglio rinunciare e ripiegare sulla stima.
+    res = await fetch(url, { signal: withTimeout(opts.signal, 9000) })
   } catch (e) {
-    if ((e as Error).name === 'AbortError') throw e
+    if (opts.signal?.aborted) throw e
     throw new TflError('Rete non raggiungibile')
   }
 

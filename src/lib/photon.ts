@@ -1,5 +1,6 @@
 import { haversineM } from './geo'
 import { toEnglishQuery } from './italian'
+import { withTimeout } from './tfl'
 
 const ENDPOINT = 'https://photon.komoot.io/api/'
 
@@ -95,7 +96,7 @@ async function runSearch(q: string, signal?: AbortSignal): Promise<PlaceHit[]> {
     lang: 'en',
   })
 
-  const res = await fetch(`${ENDPOINT}?${params}`, { signal })
+  const res = await fetch(`${ENDPOINT}?${params}`, { signal: withTimeout(signal, 9000) })
   if (!res.ok) throw new Error(`Photon HTTP ${res.status}`)
 
   const data = (await res.json()) as { features?: PhotonFeature[] }

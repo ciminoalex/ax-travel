@@ -13,23 +13,39 @@ type Props = {
 
 type State =
   | { phase: 'locating' }
+  | { phase: 'routing' }
   | { phase: 'error'; message: string }
-  | { phase: 'ready'; pos: LatLng; stops: ScoredStop[]; degraded: boolean }
+  | { phase: 'ready'; pos: LatLng; stops: ScoredStop[]; degraded: boolean; fromHotel: boolean }
 
 export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   const [state, setState] = useState<State>({ phase: 'locating' })
   const pending = dayPois.filter((p) => !p.visitedAt)
 
+  /** Calcola le tappe a partire da un punto noto, saltando il GPS. */
+  const routeFrom = useCallback(
+    async (pos: LatLng, fromHotel: boolean) => {
+      setState({ phase: 'routing' })
+      try {
+        const { stops, degraded } = await computeNextStops(pos, dayPois, trip.walkPenalty)
+        setState({ phase: 'ready', pos, stops, degraded, fromHotel })
+      } catch (e) {
+        setState({ phase: 'error', message: (e as Error).message })
+      }
+    },
+    [dayPois, trip.walkPenalty],
+  )
+
   const refresh = useCallback(async () => {
     setState({ phase: 'locating' })
+    let pos: LatLng
     try {
-      const pos = await getCurrentPosition()
-      const { stops, degraded } = await computeNextStops(pos, dayPois, trip.walkPenalty)
-      setState({ phase: 'ready', pos, stops, degraded })
+      pos = await getCurrentPosition()
     } catch (e) {
       setState({ phase: 'error', message: (e as Error).message })
+      return
     }
-  }, [dayPois, trip.walkPenalty])
+    await routeFrom(pos, false)
+  }, [routeFrom])
 
   useEffect(() => {
     void refresh()
@@ -56,12 +72,24 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
     )
   }
 
-  if (state.phase === 'locating') {
+  if (state.phase === 'locating' || state.phase === 'routing') {
     return (
       <Screen>
         <div className="mt-20 text-center text-slate-400">
-          <p className="animate-pulse text-4xl">📍</p>
-          <p className="mt-3">Cerco dove sei e calcolo i tempi…</p>
+          <p className="animate-pulse text-4xl">{state.phase === 'locating' ? '📍' : '🚇'}</p>
+          <p className="mt-3">
+            {state.phase === 'locating' ? 'Cerco dove sei…' : 'Calcolo i tempi coi mezzi…'}
+          </p>
+          {/* Se il GPS non risponde, l'alloggio è un punto di partenza
+              accettabile: meglio un risultato utile che una schermata ferma. */}
+          {state.phase === 'locating' && trip.hotel && (
+            <button
+              onClick={() => void routeFrom(trip.hotel!, true)}
+              className="mt-6 rounded-xl border border-slate-700 px-5 py-2.5 text-sm text-slate-300 active:bg-slate-800"
+            >
+              Parti dall'alloggio
+            </button>
+          )}
         </div>
       </Screen>
     )
@@ -73,12 +101,25 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
         <div className="mt-16 rounded-2xl border border-amber-800/60 bg-amber-950/40 p-5">
           <p className="font-semibold text-amber-200">Posizione non disponibile</p>
           <p className="mt-2 text-sm text-amber-100/80">{state.message}</p>
-          <button
-            onClick={() => void refresh()}
-            className="mt-4 rounded-xl bg-amber-600 px-5 py-2.5 font-semibold active:bg-amber-700"
-          >
-            Riprova
-          </button>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              onClick={() => void refresh()}
+              className="rounded-xl bg-amber-600 px-5 py-2.5 font-semibold active:bg-amber-700"
+            >
+              Riprova
+            </button>
+            {trip.hotel && (
+              <button
+                onClick={() => void routeFrom(trip.hotel!, true)}
+                className="rounded-xl border border-amber-700/60 px-5 py-2.5 font-semibold text-amber-200 active:bg-amber-900/40"
+              >
+                Parti dall'alloggio
+              </button>
+            )}
+          </div>
+          <p className="mt-3 text-xs text-amber-100/50">
+            Su iPhone: Impostazioni → Privacy → Localizzazione → Safari.
+          </p>
         </div>
       </Screen>
     )
@@ -91,6 +132,11 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
       {state.degraded && (
         <p className="mb-3 rounded-lg bg-amber-950/50 px-3 py-2 text-xs text-amber-200">
           Tempi non disponibili — ordino per distanza in linea d'aria.
+        </p>
+      )}
+      {state.fromHotel && (
+        <p className="mb-3 rounded-lg bg-slate-800/70 px-3 py-2 text-xs text-slate-300">
+          Calcolato dall'alloggio, non da dove sei ora.
         </p>
       )}
 
