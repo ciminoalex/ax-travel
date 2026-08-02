@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    /* Evita lo zoom involontario al tap sugli input in iOS Safari. */
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-slate-950 text-slate-100 antialiased;
+    /* Niente pull-to-refresh accidentale mentre scorri l'itinerario. */
+    overscroll-behavior-y: contain;
+  }
+  /* Target tap comodi anche camminando, con una mano sola. */
+  button {
+    @apply select-none;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
