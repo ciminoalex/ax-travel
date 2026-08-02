@@ -129,6 +129,78 @@ export async function suggestPlaces(request: string, context: string): Promise<A
 }
 
 /* -------------------------------------------------------------------------
+ * Arricchimento di tappe già inserite
+ * ---------------------------------------------------------------------- */
+
+const EnrichSchema = z.object({
+  places: z.array(
+    z.object({
+      id: z.string().describe('Lo stesso id ricevuto'),
+      durationMin: z.number().describe('Minuti di visita realistici per questo posto'),
+      openingHours: z.string().describe('Orari tipici, es. "10-17:30". Vuoto se incerti.'),
+      bestTimeOfDay: z.string().describe('Una di: mattina, pomeriggio, sera, indifferente'),
+      note: z.string().describe('Una riga utile, max 15 parole'),
+    }),
+  ),
+})
+
+export type EnrichedPlace = {
+  id: string
+  durationMin: number
+  openingHours: string
+  bestTimeOfDay: 'mattina' | 'pomeriggio' | 'sera' | undefined
+  note: string
+}
+
+/**
+ * Una tappa aggiunta cercandola per nome nasce con 60 minuti di default,
+ * uguale per il British Museum e per una piazza. Qui il modello dà a
+ * ciascuna una durata sensata, più orari e momento migliore.
+ */
+export async function enrichPlaces(
+  places: { id: string; name: string }[],
+): Promise<EnrichedPlace[]> {
+  const list = places.map((p) => `- id=${p.id} · ${p.name}`).join('\n')
+
+  const res = await client().messages.parse({
+    model: MODEL,
+    max_tokens: 8000,
+    system: SYSTEM_LONDON,
+    output_config: { format: zodOutputFormat(EnrichSchema), effort: 'low' },
+    messages: [
+      {
+        role: 'user',
+        content:
+          'Per ognuna di queste tappe a Londra indica quanto tempo serve davvero ' +
+          'a visitarla, gli orari tipici e il momento migliore della giornata. ' +
+          `Usa esattamente gli id ricevuti.\n\n${list}`,
+      },
+    ],
+  })
+
+  return (res.parsed_output?.places ?? []).map((p) => ({
+    id: p.id,
+    durationMin: clampDuration(p.durationMin),
+    openingHours: p.openingHours?.trim() ?? '',
+    bestTimeOfDay: normalizeTimeOfDay(p.bestTimeOfDay),
+    note: p.note?.trim() ?? '',
+  }))
+}
+
+function clampDuration(min: number): number {
+  if (!Number.isFinite(min) || min <= 0) return 60
+  return Math.min(300, Math.max(15, Math.round(min)))
+}
+
+function normalizeTimeOfDay(v: string | undefined): EnrichedPlace['bestTimeOfDay'] {
+  const s = (v ?? '').toLowerCase().trim()
+  if (s.startsWith('matt') || s.startsWith('morn')) return 'mattina'
+  if (s.startsWith('pome') || s.startsWith('after')) return 'pomeriggio'
+  if (s.startsWith('sera') || s.startsWith('even')) return 'sera'
+  return undefined
+}
+
+/* -------------------------------------------------------------------------
  * Riordino
  * ---------------------------------------------------------------------- */
 
