@@ -23,7 +23,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Deve combaciare con la major locale: il lockfile è generato da
+          # npm 11 e npm 10 lo rifiuta con un errore di versioni incompatibili.
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run build
