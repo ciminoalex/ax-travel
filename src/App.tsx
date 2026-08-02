@@ -63,6 +63,16 @@ export default function App() {
     })
   }, [])
 
+  /** Sostituisce l'ordine della giornata (usato dall'ottimizzatore). */
+  const setOrder = useCallback((ids: string[]) => {
+    setTrip((t) => {
+      const days = [...t.days]
+      if (!days[dayIndex]) return t
+      days[dayIndex] = { ...days[dayIndex], poiIds: ids }
+      return { ...t, days }
+    })
+  }, [])
+
   const reorder = useCallback((from: number, to: number) => {
     setTrip((t) => {
       const days = [...t.days]
@@ -76,20 +86,31 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex min-h-[100dvh] flex-col">
-      <main className="flex-1 overflow-y-auto pb-2">
+    // Altezza fissa, non minima: con min-h il contenitore cresce col
+    // contenuto, il main non scrolla per conto suo e la tab bar finisce
+    // in mezzo alla pagina invece che in fondo allo schermo.
+    <div className="flex h-[100dvh] flex-col overflow-hidden">
+      <main className="flex-1 overflow-y-auto overscroll-contain pb-4">
         {tab === 'now' && (
           <Now trip={trip} dayPois={dayPois} onVisit={updatePoi} onGoAdd={() => setTab('add')} />
         )}
         {tab === 'day' && (
-          <DayPlan dayPois={dayPois} onRemove={removePoi} onReorder={reorder} onUpdate={updatePoi} />
+          <DayPlan
+            dayPois={dayPois}
+            hotel={trip.hotel}
+            walkPenalty={trip.walkPenalty}
+            onRemove={removePoi}
+            onReorder={reorder}
+            onUpdate={updatePoi}
+            onSetOrder={setOrder}
+          />
         )}
         {tab === 'add' && <AddPoi onAdd={addPoi} dayPois={dayPois} hotel={trip.hotel} />}
         {tab === 'setup' && <Setup trip={trip} setTrip={setTrip} />}
       </main>
 
       <nav
-        className="sticky bottom-0 grid grid-cols-4 border-t border-slate-800 bg-slate-900/95 backdrop-blur"
+        className="grid shrink-0 grid-cols-4 border-t border-slate-800 bg-slate-900"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {TABS.map((t) => (

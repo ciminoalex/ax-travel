@@ -3,6 +3,7 @@ import type { Trip } from '../lib/types'
 import { exportTrip, importTrip, newId } from '../lib/store'
 import { searchPlaces, type PlaceHit } from '../lib/photon'
 import { describeKind } from '../lib/kinds'
+import { clearApiKey, hasApiKey, saveApiKey, testApiKey } from '../lib/ai'
 
 type Props = {
   trip: Trip
@@ -15,9 +16,98 @@ export default function Setup({ trip, setTrip }: Props) {
       <h1 className="text-2xl font-bold">Setup</h1>
       <HotelSection trip={trip} setTrip={setTrip} />
       <WalkPenaltySection trip={trip} setTrip={setTrip} />
+      <AiKeySection />
       <BackupSection trip={trip} setTrip={setTrip} />
       <VersionSection />
     </div>
+  )
+}
+
+function AiKeySection() {
+  const [key, setKey] = useState('')
+  const [saved, setSaved] = useState(() => hasApiKey())
+  const [testing, setTesting] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  async function save() {
+    const trimmed = key.trim()
+    if (!trimmed) return
+    saveApiKey(trimmed)
+    setTesting(true)
+    setMsg(null)
+    // Verificare subito evita di scoprire una chiave sbagliata più tardi,
+    // magari per strada con le mani occupate.
+    const res = await testApiKey()
+    setTesting(false)
+    if (res.ok) {
+      setSaved(true)
+      setKey('')
+      setMsg({ ok: true, text: 'Chiave valida. Le funzioni AI sono attive.' })
+    } else {
+      clearApiKey()
+      setMsg({ ok: false, text: res.error })
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+        Chiave Anthropic
+      </h2>
+      <p className="mt-1 text-xs text-slate-500">
+        Serve per capire il testo libero, arricchire i posti e suggerirne di nuovi.
+        Resta solo su questo telefono: non è nel codice e non passa da nessun server.
+      </p>
+
+      {saved ? (
+        <div className="mt-2 flex items-center justify-between rounded-2xl bg-slate-900 p-4 ring-1 ring-slate-800">
+          <p className="text-sm">
+            <span className="text-emerald-400">●</span> Chiave configurata
+          </p>
+          <button
+            onClick={() => {
+              clearApiKey()
+              setSaved(false)
+              setMsg(null)
+            }}
+            className="rounded-lg px-3 py-2 text-xs text-rose-400 active:bg-rose-950/50"
+          >
+            Rimuovi
+          </button>
+        </div>
+      ) : (
+        <>
+          <input
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            type="password"
+            inputMode="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="sk-ant-..."
+            className="mt-2 w-full rounded-2xl bg-slate-900 px-4 py-3.5 font-mono text-sm outline-none ring-1 ring-slate-800 placeholder:text-slate-600 focus:ring-sky-600"
+          />
+          <button
+            onClick={() => void save()}
+            disabled={!key.trim() || testing}
+            className="mt-2 w-full rounded-2xl bg-sky-600 py-3 font-semibold active:bg-sky-700 disabled:opacity-40"
+          >
+            {testing ? 'Verifico…' : 'Salva e verifica'}
+          </button>
+          <p className="mt-2 text-xs text-slate-600">
+            La crei su console.anthropic.com → API keys.
+          </p>
+        </>
+      )}
+
+      {msg && (
+        <p className={`mt-2 text-sm ${msg.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
+          {msg.text}
+        </p>
+      )}
+    </section>
   )
 }
 
