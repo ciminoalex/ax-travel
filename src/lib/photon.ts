@@ -1,4 +1,5 @@
 import { haversineM } from './geo'
+import { toEnglishQuery } from './italian'
 
 const ENDPOINT = 'https://photon.komoot.io/api/'
 
@@ -68,6 +69,22 @@ export async function searchPlaces(
   const q = query.trim()
   if (q.length < 2) return []
 
+  // OSM ha i nomi in inglese: "museo di storia naturale" troverebbe solo
+  // musei italiani, che il filtro geografico scarta lasciando una lista
+  // vuota su un posto che esiste.
+  const english = toEnglishQuery(q)
+
+  if (english) {
+    const hits = await runSearch(english, signal)
+    if (hits.length > 0) return hits
+    // La traduzione non ha prodotto nulla: forse era già un nome proprio
+    // ("Camden", "Soho"). Riproviamo con quello che hai scritto davvero.
+  }
+
+  return runSearch(q, signal)
+}
+
+async function runSearch(q: string, signal?: AbortSignal): Promise<PlaceHit[]> {
   const params = new URLSearchParams({
     q,
     lat: String(LONDON.lat),
