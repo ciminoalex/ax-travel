@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Poi } from '../lib/types'
 import { searchPlaces, type PlaceHit } from '../lib/photon'
+import { describeKind } from '../lib/kinds'
+import { formatDistance, haversineM } from '../lib/geo'
 
 type Props = {
   onAdd: (poi: Omit<Poi, 'id'>) => void
   dayPois: Poi[]
+  /** Se c'è l'hotel, le distanze si leggono da lì: è il tuo riferimento. */
+  hotel: Poi | null
 }
 
 /** Photon è gratuito e senza chiave: il debounce è rispetto, non cosmesi. */
 const DEBOUNCE_MS = 600
 
-export default function AddPoi({ onAdd, dayPois }: Props) {
+/** Centro di Londra: riferimento di ripiego finché non c'è l'hotel. */
+const LONDON = { lat: 51.5074, lng: -0.1278 }
+
+export default function AddPoi({ onAdd, dayPois, hotel }: Props) {
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<PlaceHit[]>([])
   const [busy, setBusy] = useState(false)
@@ -88,6 +95,10 @@ export default function AddPoi({ onAdd, dayPois }: Props) {
       <ul className="mt-4 space-y-2">
         {hits.map((h, i) => {
           const dup = alreadyThere.has(`${h.lat.toFixed(4)},${h.lng.toFixed(4)}`)
+          const kind = describeKind(h.kindKey, h.kind)
+          const origin = hotel ?? LONDON
+          const distance = formatDistance(haversineM(origin, h))
+
           return (
             <li key={i}>
               <button
@@ -95,9 +106,19 @@ export default function AddPoi({ onAdd, dayPois }: Props) {
                 disabled={dup}
                 className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-left ring-1 ring-slate-800 active:bg-slate-800 disabled:opacity-40"
               >
-                <p className="font-medium">{h.name}</p>
-                <p className="text-xs text-slate-500">
-                  {dup ? 'già nella giornata' : h.address || h.kind}
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="min-w-0 truncate font-medium">{h.name}</p>
+                  {/* Categoria e distanza: sono le due cose che distinguono
+                      due risultati con lo stesso nome. */}
+                  <span className="shrink-0 rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-300">
+                    {kind.icon} {kind.label}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate text-xs text-slate-500">
+                  {dup ? 'già nella giornata' : h.address || 'indirizzo non disponibile'}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-600">
+                  {distance} {hotel ? "dall'alloggio" : 'dal centro'}
                 </p>
               </button>
             </li>

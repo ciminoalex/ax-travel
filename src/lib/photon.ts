@@ -11,8 +11,10 @@ export type PlaceHit = {
   address: string
   lat: number
   lng: number
-  /** es. "museum", "market" — usato per l'icona e, in fase B, la categoria. */
+  /** osm_value, es. "museum", "seafood". Distingue la torre dalla pescheria. */
   kind: string
+  /** osm_key, es. "tourism", "shop". Fallback quando il valore è insolito. */
+  kindKey: string
 }
 
 type PhotonProps = {
@@ -146,7 +148,17 @@ function rank(features: PhotonFeature[], query: string): PlaceHit[] {
     score += KEY_SCORE[p.osm_key ?? ''] ?? 10
     score -= distanceKm / 4
 
-    scored.push({ hit: { name, address: formatAddress(p), lat, lng, kind: p.osm_value ?? '' }, score })
+    scored.push({
+      hit: {
+        name,
+        address: formatAddress(p),
+        lat,
+        lng,
+        kind: p.osm_value ?? '',
+        kindKey: p.osm_key ?? '',
+      },
+      score,
+    })
   }
 
   scored.sort((a, b) => b.score - a.score)

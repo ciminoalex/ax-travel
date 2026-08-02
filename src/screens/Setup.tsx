@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Trip } from '../lib/types'
 import { exportTrip, importTrip, newId } from '../lib/store'
 import { searchPlaces, type PlaceHit } from '../lib/photon'
+import { describeKind } from '../lib/kinds'
 
 type Props = {
   trip: Trip
@@ -15,7 +16,38 @@ export default function Setup({ trip, setTrip }: Props) {
       <HotelSection trip={trip} setTrip={setTrip} />
       <WalkPenaltySection trip={trip} setTrip={setTrip} />
       <BackupSection trip={trip} setTrip={setTrip} />
+      <VersionSection />
     </div>
+  )
+}
+
+/**
+ * Sapere quale versione gira sul telefono è l'unico modo, a distanza, di
+ * distinguere "il fix non funziona" da "il fix non è ancora arrivato".
+ */
+function VersionSection() {
+  const built = new Date(__BUILD_TIME__)
+  const label = built.toLocaleString('it-IT', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return (
+    <section className="border-t border-slate-800 pt-4">
+      <p className="text-xs text-slate-600">Versione del {label}</p>
+      <button
+        onClick={() => {
+          // Forza il ricarico saltando la cache, per i casi disperati.
+          void caches?.keys().then((k) => Promise.all(k.map((n) => caches.delete(n))))
+            .finally(() => location.reload())
+        }}
+        className="mt-2 text-xs text-slate-500 underline active:text-slate-300"
+      >
+        Forza aggiornamento
+      </button>
+    </section>
   )
 }
 
@@ -88,8 +120,13 @@ function HotelSection({ trip, setTrip }: Props) {
                   }}
                   className="w-full rounded-xl bg-slate-900 px-4 py-3 text-left ring-1 ring-slate-800 active:bg-slate-800"
                 >
-                  <p className="font-medium">{h.name}</p>
-                  <p className="text-xs text-slate-500">{h.address}</p>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="min-w-0 truncate font-medium">{h.name}</p>
+                    <span className="shrink-0 rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-300">
+                      {describeKind(h.kindKey, h.kind).icon} {describeKind(h.kindKey, h.kind).label}
+                    </span>
+                  </div>
+                  <p className="truncate text-xs text-slate-500">{h.address}</p>
                 </button>
               </li>
             ))}

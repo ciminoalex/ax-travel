@@ -94,13 +94,27 @@ function normalize(s: string): string {
  * La query da mandare a Photon, o null se non c'è niente da tradurre
  * (query già in inglese: va lasciata intatta).
  */
+/**
+ * "museo di storia naturale" e "museo della storia naturale" sono la stessa
+ * richiesta: confrontarle senza articoli evita di dover elencare ogni
+ * variante di preposizione nel dizionario.
+ */
+function withoutStopwords(n: string): string {
+  return n
+    .split(' ')
+    .filter((w) => w && !STOPWORDS.has(w))
+    .join(' ')
+}
+
 export function toEnglishQuery(query: string): string | null {
   const n = normalize(query)
   if (!n) return null
 
   // Match su un landmark noto: è il caso più frequente e il più preciso.
+  const bare = withoutStopwords(n)
   for (const [it, en] of Object.entries(LANDMARKS)) {
-    if (n === it || n.includes(it)) return en
+    const bareKey = withoutStopwords(it)
+    if (bare === bareKey || bare.includes(bareKey)) return en
   }
 
   const words = n.split(' ')

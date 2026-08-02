@@ -6,6 +6,11 @@ import { VitePWA } from 'vite-plugin-pwa'
 // https://ciminoalex.github.io/ax-travel/
 export default defineConfig({
   base: '/ax-travel/',
+  // Mostrato in Setup: permette di capire a colpo d'occhio se il telefono
+  // ha davvero l'ultima versione o una copia vecchia in cache.
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     VitePWA({
@@ -29,6 +34,11 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // Senza questi due, una correzione pubblicata non raggiunge un
+        // telefono che ha già l'app installata finché non svuota la cache:
+        // il vecchio service worker resta in carica a tempo indeterminato.
+        clientsClaim: true,
+        skipWaiting: true,
         // Le API di rete non vanno mai in cache "stale": i tempi di viaggio
         // devono essere freschi. La cache dell'itinerario sta in localStorage.
         runtimeCaching: [

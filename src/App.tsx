@@ -84,7 +84,7 @@ export default function App() {
         {tab === 'day' && (
           <DayPlan dayPois={dayPois} onRemove={removePoi} onReorder={reorder} onUpdate={updatePoi} />
         )}
-        {tab === 'add' && <AddPoi onAdd={addPoi} dayPois={dayPois} />}
+        {tab === 'add' && <AddPoi onAdd={addPoi} dayPois={dayPois} hotel={trip.hotel} />}
         {tab === 'setup' && <Setup trip={trip} setTrip={setTrip} />}
       </main>
 
