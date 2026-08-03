@@ -115,6 +115,51 @@ export default function App() {
     [safeIndex],
   )
 
+  /**
+   * Registra una prenotazione: giorno e ora insieme.
+   *
+   * Sposta la tappa nella giornata giusta (creandola se il viaggio non
+   * arriva fin lì) e la blocca. Farlo in un'unica operazione evita di
+   * dover prima spostare e poi fissare l'ora, dimenticandosi un passaggio.
+   */
+  const setBooking = useCallback((poiId: string, date: string, time: string) => {
+    setTrip((t) => {
+      const poi = t.pois[poiId]
+      if (!poi) return t
+
+      const days = t.days.map((d) => ({ ...d, poiIds: [...d.poiIds] }))
+      while (!days.some((d) => d.date === date)) {
+        const last = days[days.length - 1]
+        if (!last || last.date > date) break
+        days.push({ date: addDays(last.date, 1), poiIds: [] })
+      }
+
+      const target = days.findIndex((d) => d.date === date)
+      if (target === -1) return t
+
+      for (const d of days) d.poiIds = d.poiIds.filter((x) => x !== poiId)
+      days[target].poiIds.push(poiId)
+
+      return {
+        ...t,
+        days,
+        pois: { ...t.pois, [poiId]: { ...poi, pinnedDate: date, pinnedTime: time } },
+      }
+    })
+  }, [])
+
+  /** Toglie la prenotazione: la tappa torna spostabile. */
+  const clearBooking = useCallback((poiId: string) => {
+    setTrip((t) => {
+      const poi = t.pois[poiId]
+      if (!poi) return t
+      return {
+        ...t,
+        pois: { ...t.pois, [poiId]: { ...poi, pinnedDate: undefined, pinnedTime: undefined } },
+      }
+    })
+  }, [])
+
   /** Blocca (o libera) una tappa nella giornata in cui si trova. */
   const togglePin = useCallback(
     (poiId: string) => {
@@ -257,6 +302,8 @@ export default function App() {
             onMoveToDay={moveToDay}
             onDefer={deferToNextDay}
             onTogglePin={togglePin}
+            onSetBooking={setBooking}
+            onClearBooking={clearBooking}
             onRemove={removePoi}
             onReorder={reorder}
             onUpdate={updatePoi}

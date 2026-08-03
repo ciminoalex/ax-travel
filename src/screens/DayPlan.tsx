@@ -16,6 +16,9 @@ type Props = {
   /** Sposta al giorno dopo e blocca lì: "oggi il museo è pieno". */
   onDefer: (poiId: string) => void
   onTogglePin: (poiId: string) => void
+  /** Registra giorno e ora della prenotazione in un colpo solo. */
+  onSetBooking: (poiId: string, date: string, time: string) => void
+  onClearBooking: (poiId: string) => void
   onRemove: (id: string) => void
   onReorder: (from: number, to: number) => void
   onUpdate: (id: string, patch: Partial<Poi>) => void
@@ -249,7 +252,13 @@ export default function DayPlan(props: Props) {
                       {p.bestTimeOfDay && <span>meglio {p.bestTimeOfDay}</span>}
                     </div>
 
-                    <TimeRow poi={p} onUpdate={onUpdate} />
+                    <TimeRow
+                      poi={p}
+                      trip={trip}
+                      currentDate={trip.days[dayIndex]?.date ?? ''}
+                      onSetBooking={props.onSetBooking}
+                      onClearBooking={props.onClearBooking}
+                    />
                     {p.openingHours && (
                       <p className="mt-1 text-xs text-amber-500/70">
                         orari {p.openingHours} — da verificare
@@ -366,86 +375,118 @@ export default function DayPlan(props: Props) {
  * Prenotato: quello che hai davvero ottenuto. Da lì in poi è un vincolo, e
  * nessuna riorganizzazione lo tocca.
  */
-function TimeRow({ poi, onUpdate }: { poi: Poi; onUpdate: Props['onUpdate'] }) {
+function TimeRow({
+  poi,
+  trip,
+  currentDate,
+  onSetBooking,
+  onClearBooking,
+}: {
+  poi: Poi
+  trip: Trip
+  currentDate: string
+  onSetBooking: Props['onSetBooking']
+  onClearBooking: Props['onClearBooking']
+}) {
   const [editing, setEditing] = useState(false)
-  const [value, setValue] = useState(poi.pinnedTime ?? poi.suggestedTime ?? '')
+  const [time, setTime] = useState(poi.pinnedTime ?? poi.suggestedTime ?? '')
+  const [date, setDate] = useState(poi.pinnedDate ?? currentDate)
 
-  if (poi.pinnedTime && !editing) {
+  function open() {
+    setTime(poi.pinnedTime ?? poi.suggestedTime ?? '')
+    setDate(poi.pinnedDate ?? currentDate)
+    setEditing(true)
+  }
+
+  if (editing) {
+    // Giorno e ora nello stesso posto: prenotare per giovedì non deve
+    // richiedere di spostare prima la tappa a mano.
     return (
-      <div className="mt-1 flex items-center gap-2">
-        <span className="rounded bg-emerald-900/70 px-2 py-0.5 text-xs font-semibold text-emerald-200">
-          🎟️ prenotato {poi.pinnedTime}
-        </span>
-        <button
-          onClick={() => {
-            setValue(poi.pinnedTime ?? '')
-            setEditing(true)
-          }}
-          className="text-xs text-slate-500 underline active:text-slate-300"
-        >
-          modifica
-        </button>
+      <div className="mt-2 rounded-xl bg-slate-950/60 p-2.5 ring-1 ring-sky-800/50">
+        <p className="text-xs font-medium text-sky-300">Quando hai prenotato?</p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <select
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="rounded-lg bg-slate-800 px-2 py-1.5 text-xs text-slate-100 outline-none ring-1 ring-slate-700 focus:ring-sky-600"
+          >
+            {trip.days.map((d, i) => (
+              <option key={d.date} value={d.date}>
+                G{i + 1} · {shortDate(d.date)}
+              </option>
+            ))}
+          </select>
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className="rounded-lg bg-slate-800 px-2 py-1.5 text-xs text-slate-100 outline-none ring-1 ring-slate-700 focus:ring-sky-600"
+          />
+          <button
+            onClick={() => {
+              if (time) onSetBooking(poi.id, date, time)
+              setEditing(false)
+            }}
+            disabled={!time}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold active:bg-emerald-700 disabled:opacity-40"
+          >
+            Conferma
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="px-1 text-xs text-slate-500 underline active:text-slate-300"
+          >
+            annulla
+          </button>
+        </div>
+        {poi.pinnedTime && (
+          <button
+            onClick={() => {
+              onClearBooking(poi.id)
+              setEditing(false)
+            }}
+            className="mt-1.5 text-xs text-rose-400 underline active:text-rose-300"
+          >
+            Rimuovi la prenotazione
+          </button>
+        )}
       </div>
     )
   }
 
-  if (editing) {
+  if (poi.pinnedTime) {
     return (
-      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        <input
-          type="time"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          className="rounded-lg bg-slate-800 px-2 py-1 text-xs text-slate-100 outline-none ring-1 ring-slate-700 focus:ring-sky-600"
-        />
-        <button
-          onClick={() => {
-            onUpdate(poi.id, { pinnedTime: value || undefined })
-            setEditing(false)
-          }}
-          className="rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-semibold active:bg-emerald-800"
-        >
-          Conferma
-        </button>
-        {poi.pinnedTime && (
-          <button
-            onClick={() => {
-              onUpdate(poi.id, { pinnedTime: undefined })
-              setEditing(false)
-            }}
-            className="rounded-lg px-2 py-1 text-xs text-rose-400 active:bg-rose-950/50"
-          >
-            Annulla prenotazione
-          </button>
-        )}
-        <button
-          onClick={() => setEditing(false)}
-          className="text-xs text-slate-500 underline active:text-slate-300"
-        >
-          chiudi
-        </button>
-      </div>
+      <button
+        onClick={open}
+        className="mt-1.5 flex items-center gap-2 rounded-lg bg-emerald-900/70 px-2 py-1 text-xs font-semibold text-emerald-200 active:bg-emerald-800"
+      >
+        🎟️ prenotato {poi.pinnedTime}
+        {poi.pinnedDate && poi.pinnedDate !== currentDate && ` · ${shortDate(poi.pinnedDate)}`}
+        <span className="font-normal opacity-60">modifica</span>
+      </button>
     )
   }
 
   return (
-    <div className="mt-1 flex items-center gap-2">
+    <button
+      onClick={open}
+      className="mt-1.5 flex items-center gap-2 rounded-lg bg-slate-800 px-2 py-1 text-xs active:bg-slate-700"
+    >
       {poi.suggestedTime ? (
-        <span className="text-xs text-sky-300/80">🕐 arrivo previsto {poi.suggestedTime}</span>
+        <span className="text-sky-300">🕐 arrivo previsto {poi.suggestedTime}</span>
       ) : (
-        <span className="text-xs text-slate-600">nessun orario</span>
+        <span className="text-slate-400">🕐 nessun orario</span>
       )}
-      <button
-        onClick={() => {
-          setValue(poi.suggestedTime ?? '')
-          setEditing(true)
-        }}
-        className="text-xs text-slate-500 underline active:text-slate-300"
-      >
-        ho prenotato
-      </button>
-    </div>
+      <span className="text-slate-400">· ho prenotato</span>
+    </button>
   )
+}
+
+function shortDate(iso: string): string {
+  return new Date(iso + 'T12:00:00').toLocaleDateString('it-IT', {
+    weekday: 'short',
+    day: 'numeric',
+  })
 }
 
 /** Oltre questo, una giornata di visite non sta più in piedi. */
