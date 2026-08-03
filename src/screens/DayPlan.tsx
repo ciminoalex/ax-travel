@@ -603,63 +603,97 @@ function StopActions({
 
       {poi.note && <p className="mt-2 text-[13px] italic text-faint">{poi.note}</p>}
 
-      <div className="mt-2.5 flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          onClick={() =>
-            onUpdate(poi.id, { visitedAt: poi.visitedAt ? undefined : new Date().toISOString() })
-          }
-        >
-          {poi.visitedAt ? 'Da rivedere' : 'Visitato'}
-        </Button>
-
-        {!poi.visitedAt && (
-          <Button size="sm" onClick={() => onDefer(poi.id)} title="Sposta a domani e blocca lì">
-            Non oggi
+      {/*
+       * Righe volute, non `flex-wrap`.
+       *
+       * A capo automatico i bottoni cadevano dove capitava, e le due frecce
+       * finivano su righe diverse: una coppia che significa qualcosa solo
+       * stando insieme. Qui ogni riga raggruppa azioni della stessa natura,
+       * e su e giù sono un blocco unico che non può spezzarsi.
+       */}
+      <div className="mt-2.5 flex flex-col gap-2">
+        {/* Cos'è successo alla tappa. */}
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            className="flex-1"
+            onClick={() =>
+              onUpdate(poi.id, { visitedAt: poi.visitedAt ? undefined : new Date().toISOString() })
+            }
+          >
+            {poi.visitedAt ? 'Da rivedere' : 'Visitato'}
           </Button>
+
+          {!poi.visitedAt && (
+            <Button
+              size="sm"
+              className="flex-1"
+              onClick={() => onDefer(poi.id)}
+              title="Sposta a domani e blocca lì"
+            >
+              Non oggi
+            </Button>
+          )}
+        </div>
+
+        {/* Dove va la tappa. */}
+        {(dayCount > 1 || trip.days.length > 1) && (
+          <div className="flex gap-2">
+            {dayCount > 1 && (
+              <div className="flex h-[38px] shrink-0 overflow-hidden rounded-xl border border-ink/[0.14]">
+                <button
+                  onClick={() => onReorder(index, index - 1)}
+                  aria-label="Sposta su"
+                  className="flex items-center justify-center px-4 active:bg-ink/[0.06]"
+                >
+                  <IconUp size={15} />
+                </button>
+                <span className="w-px bg-ink/[0.14]" />
+                <button
+                  onClick={() => onReorder(index, index + 1)}
+                  aria-label="Sposta giù"
+                  className="flex items-center justify-center px-4 active:bg-ink/[0.06]"
+                >
+                  <IconDown size={15} />
+                </button>
+              </div>
+            )}
+
+            {trip.days.length > 1 && (
+              <Button size="sm" className="flex-1" onClick={() => setMoving((m) => !m)}>
+                Sposta di giorno
+              </Button>
+            )}
+          </div>
         )}
 
-        {dayCount > 1 && (
-          <>
-            <Button size="sm" onClick={() => onReorder(index, index - 1)} aria-label="Sposta su">
-              <IconUp size={15} />
-            </Button>
-            <Button size="sm" onClick={() => onReorder(index, index + 1)} aria-label="Sposta giù">
-              <IconDown size={15} />
-            </Button>
-          </>
-        )}
-
-        {trip.days.length > 1 && (
-          <Button size="sm" onClick={() => setMoving((m) => !m)}>
-            Sposta di giorno
+        {/* Vincoli, e l'unica azione distruttiva — sola, a destra. */}
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            className={`flex-1 ${poi.pinnedDate ? 'border-amber/50 bg-amber/10 text-amber-deep' : ''}`}
+            onClick={() => onTogglePin(poi.id)}
+            title={
+              poi.pinnedDate
+                ? 'Liberala: potrà essere spostata riorganizzando'
+                : 'Blocca in questa giornata'
+            }
+          >
+            {poi.pinnedDate ? 'Fissata qui' : 'Fissa qui'}
           </Button>
-        )}
 
-        <Button
-          size="sm"
-          onClick={() => onTogglePin(poi.id)}
-          title={
-            poi.pinnedDate
-              ? 'Liberala: potrà essere spostata riorganizzando'
-              : 'Blocca in questa giornata'
-          }
-          className={poi.pinnedDate ? 'border-amber/50 bg-amber/10 text-amber-deep' : ''}
-        >
-          {poi.pinnedDate ? 'Fissata qui' : 'Fissa qui'}
-        </Button>
-
-        <Button
-          size="sm"
-          onClick={() => {
-            onRemove(poi.id)
-            onDone()
-          }}
-          className="ml-auto border-terra/30 text-terra"
-          aria-label="Rimuovi"
-        >
-          <IconTrash size={15} />
-        </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              onRemove(poi.id)
+              onDone()
+            }}
+            className="w-[46px] shrink-0 border-terra/30 px-0 text-terra"
+            aria-label="Rimuovi la tappa"
+          >
+            <IconTrash size={15} />
+          </Button>
+        </div>
       </div>
 
       {moving && (
