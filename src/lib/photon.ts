@@ -41,15 +41,28 @@ type PhotonFeature = {
  * bici che portano lo stesso nome. Questi non sono posti da visitare.
  */
 const REJECT_VALUES = new Set([
+  // Arredo urbano e servizi: non sono posti da visitare.
   'bus_stop', 'bus_station', 'bicycle_rental', 'bicycle_parking', 'parking',
-  'parking_entrance', 'crossing', 'traffic_signals', 'street_lamp', 'bench',
-  'waste_basket', 'post_box', 'telephone', 'atm', 'recycling', 'taxi',
-  'car_sharing', 'charging_station', 'toilets', 'drinking_water',
+  'parking_entrance', 'street_lamp', 'bench', 'waste_basket', 'post_box',
+  'telephone', 'atm', 'recycling', 'taxi', 'car_sharing', 'charging_station',
+  'toilets', 'drinking_water',
+  // Elementi della rete stradale, non luoghi.
+  'crossing', 'traffic_signals', 'stop', 'give_way', 'turning_circle',
+  'turning_loop', 'mini_roundabout', 'motorway_junction', 'milestone',
+  'passing_place', 'speed_camera', 'elevator', 'services', 'rest_area',
+  'construction', 'proposed', 'platform', 'emergency_access_point',
+  // Infrastruttura ferroviaria (le stazioni restano: sono destinazioni).
+  'rail', 'switch', 'signal', 'level_crossing', 'buffer_stop',
+  'subway_entrance', 'railway_crossing',
 ])
 
-const REJECT_KEYS = new Set([
-  'highway', 'barrier', 'traffic_calming', 'power', 'railway', 'emergency',
-])
+/**
+ * Famiglie da scartare per intero. `highway` NON è qui: Oxford Street,
+ * Abbey Road, Brick Lane e Portobello Road sono `highway` in OSM, e
+ * scartarle in blocco le rendeva introvabili. Il rumore delle strade
+ * senza nome cercato è tenuto giù dal punteggio, non da un veto.
+ */
+const REJECT_KEYS = new Set(['barrier', 'traffic_calming', 'power', 'emergency'])
 
 /** Quanto è "un posto da visitare". Più alto = più su nella lista. */
 const KEY_SCORE: Record<string, number> = {
@@ -60,6 +73,10 @@ const KEY_SCORE: Record<string, number> = {
   shop: 45,
   building: 30,
   place: 25,
+  // Basso di proposito: una via emerge quando la cerchi per nome (il match
+  // esatto vale molto di più), non quando cerchi altro.
+  highway: 15,
+  railway: 15,
 }
 
 /** Oltre questo raggio non è più "un posto da vedere a Londra". */
@@ -166,13 +183,17 @@ function rank(features: PhotonFeature[], query: string): PlaceHit[] {
   return dedupe(scored.map((s) => s.hit))
 }
 
-/** Lo stesso posto compare più volte (nodo + area): teniamo il primo. */
+/**
+ * Lo stesso posto compare più volte: come nodo e come area, o — per una
+ * via — spezzato nei segmenti che la compongono. Oxford Street è lunga
+ * quasi due chilometri, quindi per le strade la soglia dev'essere molto
+ * più larga, altrimenti la stessa via occupa mezza lista.
+ */
 function dedupe(hits: PlaceHit[]): PlaceHit[] {
   const out: PlaceHit[] = []
   for (const h of hits) {
-    const dup = out.some(
-      (o) => o.name === h.name && haversineM(o, h) < 250,
-    )
+    const limit = h.kindKey === 'highway' || h.kindKey === 'railway' ? 5000 : 250
+    const dup = out.some((o) => o.name === h.name && haversineM(o, h) < limit)
     if (!dup) out.push(h)
   }
   return out
