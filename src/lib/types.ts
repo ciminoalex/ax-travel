@@ -7,6 +7,13 @@ export type Poi = {
   lng: number
   /** Quanto ci resto. Default 60, modificabile a mano. */
   durationMin: number
+
+  /**
+   * Durata piena, prima che la ripianificazione la comprimesse per far
+   * stare tutto. Conservarla rende la compressione reversibile: se togli
+   * una tappa e ripianifichi, le altre si riprendono il loro tempo.
+   */
+  fullDurationMin?: number
   /** Se valorizzato (ISO), il posto è visitato. Dà anche la cronologia gratis. */
   visitedAt?: string
 

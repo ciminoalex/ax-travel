@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Poi, Trip } from '../lib/types'
+import type { ReplanSummary } from '../App'
 import { formatTime, optimizeDay } from '../lib/optimize'
 import { describeError, enrichPlaces, hasApiKey, reorderDay } from '../lib/ai'
 import { areaLabel } from '../lib/split'
-import { dayStartMinutes, DAY_START_MIN } from '../lib/dayOrder'
+import { dayStartMinutes, DAY_START_MIN, DAY_END_MIN } from '../lib/dayOrder'
 
 type Props = {
   trip: Trip
@@ -20,6 +21,8 @@ type Props = {
   /** Registra giorno e ora della prenotazione in un colpo solo. */
   onSetBooking: (poiId: string, date: string, time: string) => void
   onClearBooking: (poiId: string) => void
+  /** Ripianifica l'intero viaggio da adesso. */
+  onReplan: () => ReplanSummary
   onRemove: (id: string) => void
   onReorder: (from: number, to: number) => void
   onUpdate: (id: string, patch: Partial<Poi>) => void
@@ -30,6 +33,7 @@ type Busy =
   | { kind: 'none' }
   | { kind: 'optimize'; done: number; total: number; step: string }
   | { kind: 'enrich' }
+  | { kind: 'replan' }
 
 type Notice = { tone: 'ok' | 'warn'; lines: string[] } | null
 
@@ -38,14 +42,29 @@ export default function DayPlan(props: Props) {
   const [busy, setBusy] = useState<Busy>({ kind: 'none' })
   const [notice, setNotice] = useState<Notice>(null)
   const [moving, setMoving] = useState<string | null>(null)
+  const [pendingOptimize, setPendingOptimize] = useState<string[] | null>(null)
+
+  useEffect(() => {
+    if (!pendingOptimize) return
+    const lines = pendingOptimize
+    setPendingOptimize(null)
+    void optimize(lines)
+    // Solo quando arriva una richiesta pendente: dayPois qui è già quello nuovo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOptimize])
 
   const visited = dayPois.filter((p) => p.visitedAt).length
   const totalMin = dayPois.filter((p) => !p.visitedAt).reduce((s, p) => s + p.durationMin, 0)
 
-  async function optimize() {
+  async function optimize(prefix: string[] = []) {
     const pending = dayPois.filter((p) => !p.visitedAt)
     if (pending.length < 3) {
-      setNotice({ tone: 'warn', lines: ['Servono almeno 3 tappe da visitare.'] })
+      // Con poche tappe non c'è niente da ottimizzare, ma se veniamo da una
+      // ripianificazione il suo esito va comunque mostrato.
+      if (prefix.length === 0) {
+        setNotice({ tone: 'warn', lines: ['Servono almeno 3 tappe da visitare.'] })
+      }
+      setBusy({ kind: 'none' })
       return
     }
 
@@ -66,7 +85,7 @@ export default function DayPlan(props: Props) {
       )
 
       let finalIds = orderedIds
-      const lines = ['Giro riordinato per ridurre tempi e camminata.']
+      const lines = [...prefix, 'Giro riordinato per ridurre tempi e camminata.']
       if (startMin > DAY_START_MIN) {
         lines.push(`Pianificato a partire da adesso, le ${formatTime(startMin)}.`)
       }
@@ -108,6 +127,18 @@ export default function DayPlan(props: Props) {
         }
       }
 
+      // Una tappa che comincia dopo la chiusura è tempo buttato: meglio
+      // saperlo adesso che trovarsi davanti a una porta sbarrata.
+      const tooLate = schedule.filter((e) => e.arriveMin >= DAY_END_MIN)
+      if (tooLate.length > 0) {
+        const names = tooLate
+          .map((e) => pending.find((p) => p.id === e.poiId)?.name)
+          .filter(Boolean)
+        lines.push(
+          `Oltre l'orario di chiusura: ${names.join(', ')}. Conviene spostarle a domani.`,
+        )
+      }
+
       const late = schedule.filter((e) => e.lateBy && e.lateBy > 0)
       for (const e of late) {
         const poi = pending.find((p) => p.id === e.poiId)
@@ -118,12 +149,50 @@ export default function DayPlan(props: Props) {
         }
       }
 
-      setNotice({ tone: degraded || late.length > 0 ? 'warn' : 'ok', lines })
+      setNotice({
+        tone: degraded || late.length > 0 || tooLate.length > 0 ? 'warn' : 'ok',
+        lines,
+      })
     } catch (e) {
       setNotice({ tone: 'warn', lines: [describeError(e)] })
     } finally {
       setBusy({ kind: 'none' })
     }
+  }
+
+  /**
+   * Rifà il piano di tutto il viaggio, poi mette a punto la giornata di
+   * oggi coi tempi reali: è quella che serve subito, le altre si
+   * ottimizzano quando arriva il loro turno.
+   */
+  function replan() {
+    setBusy({ kind: 'replan' })
+    setNotice(null)
+
+    const summary = props.onReplan()
+
+    const lines = [
+      summary.remainingDays === 1
+        ? 'Programma rifatto per oggi.'
+        : `Programma rifatto su ${summary.remainingDays} giorni.`,
+      `Oggi: ${summary.movedToday} ${summary.movedToday === 1 ? 'tappa' : 'tappe'}, ${formatHours(summary.todayMinutes)} di visite.`,
+    ]
+    if (summary.compressedMin > 0) {
+      lines.push(
+        `Programma pieno: ho accorciato ${summary.compressedCount} visite di ${formatHours(summary.compressedMin)} in tutto per farle entrare.`,
+      )
+    }
+    if (summary.overflow > 0) {
+      lines.push(
+        `Restano ${formatHours(summary.overflow)} di troppo anche così: togli una tappa o aggiungi una giornata.`,
+      )
+    }
+
+    setNotice({ tone: summary.overflow > 0 ? 'warn' : 'ok', lines })
+    // L'ottimizzazione parte al render successivo, quando la lista
+    // riorganizzata è arrivata fin qui: lanciarla adesso lavorerebbe
+    // sull'ordine vecchio.
+    setPendingOptimize(lines)
   }
 
   /** Stima durate e orari reali sulle tappe aggiunte per nome. */
@@ -170,6 +239,21 @@ export default function DayPlan(props: Props) {
           {totalMin > 0 && ` · ${formatHours(totalMin)} di visite`}
         </p>
       </div>
+
+      {/* L'azione principale quando qualcosa va storto: rifà il piano di
+          tutto il viaggio a partire da adesso. Sta sopra le altre e occupa
+          tutta la larghezza perché è quella che si cerca di corsa. */}
+      <button
+        onClick={() => void replan()}
+        disabled={busy.kind !== 'none'}
+        className="mt-3 w-full rounded-2xl bg-gradient-to-r from-sky-600 to-indigo-600 py-4 text-base font-bold shadow-lg shadow-sky-900/30 active:from-sky-700 active:to-indigo-700 disabled:opacity-50"
+      >
+        {busy.kind === 'replan' ? 'Ripianifico…' : '🔄 Ripianifica da adesso'}
+      </button>
+      <p className="mt-1 px-1 text-center text-xs text-slate-500">
+        Rifà il programma di tutti i giorni tenendo conto dell'ora, di cosa hai
+        già visto, dei rinvii e delle prenotazioni.
+      </p>
 
       {dayPois.length === 0 ? (
         <p className="mt-10 text-center text-slate-500">
@@ -254,7 +338,16 @@ export default function DayPlan(props: Props) {
                     <p className={`font-medium ${p.visitedAt ? 'line-through' : ''}`}>{p.name}</p>
                     {p.address && <p className="truncate text-xs text-slate-500">{p.address}</p>}
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                      <span>⏱️ {p.durationMin} min</span>
+                      {p.fullDurationMin && p.fullDurationMin > p.durationMin ? (
+                        <span className="text-amber-400">
+                          ⏱️ {p.durationMin} min{' '}
+                          <span className="text-amber-500/60 line-through">
+                            {p.fullDurationMin}
+                          </span>
+                        </span>
+                      ) : (
+                        <span>⏱️ {p.durationMin} min</span>
+                      )}
                       {p.category && (
                         <span className="rounded bg-slate-800 px-1.5 py-0.5">{p.category}</span>
                       )}

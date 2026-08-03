@@ -2,7 +2,25 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Poi, Trip } from './lib/types'
 import { loadTrip, newId, poisOfDay, saveTrip, todayISO } from './lib/store'
 import { splitByArea } from './lib/split'
-import { dayStartMinutes, orderByBookings } from './lib/dayOrder'
+import { compressToFit } from './lib/compress'
+import {
+  dayCapacityMinutes,
+  dayStartMinutes,
+  orderByBookings,
+  spillOverflow,
+} from './lib/dayOrder'
+
+/** Cosa è cambiato con la ripianificazione, da raccontare all'utente. */
+export type ReplanSummary = {
+  movedToday: number
+  remainingDays: number
+  todayMinutes: number
+  /** Minuti che non entrano nemmeno dopo aver accorciato le visite. */
+  overflow: number
+  /** Minuti recuperati accorciando le visite. */
+  compressedMin: number
+  compressedCount: number
+}
 import Now from './screens/Now'
 import DayPlan from './screens/DayPlan'
 import AddPoi from './screens/AddPoi'
@@ -234,6 +252,130 @@ export default function App() {
   }, [])
 
   /**
+   * Ripianifica il viaggio da adesso in poi.
+   *
+   * Tiene conto di tutto ciò che è già successo: quello che hai visitato
+   * resta dov'è, le prenotazioni non si toccano, le tappe rimandate
+   * restano nel giorno in cui le hai spostate. Il resto viene ridistribuito
+   * sui giorni che restano, con la giornata di oggi che riceve solo quanto
+   * ci sta davvero da adesso alla chiusura dei musei.
+   *
+   * Le giornate ormai passate non vengono più riempite.
+   */
+  const replanFromNow = useCallback((): ReplanSummary => {
+    let summary: ReplanSummary = {
+      movedToday: 0,
+      remainingDays: 0,
+      todayMinutes: 0,
+      overflow: 0,
+      compressedMin: 0,
+      compressedCount: 0,
+    }
+
+    setTrip((t) => {
+      const today = todayISO()
+      const all = t.days.flatMap((d) => d.poiIds.map((id) => t.pois[id])).filter(Boolean)
+      const visited = all.filter((p) => p.visitedAt)
+      const pending = all.filter((p) => !p.visitedAt)
+      if (pending.length === 0) return t
+
+      // Solo da oggi in avanti: nei giorni passati non si programma più.
+      const futureDays = t.days.filter((d) => d.date >= today)
+      const dates =
+        futureDays.length > 0 ? futureDays.map((d) => d.date) : [today]
+
+      const pinned = pending.filter((p) => p.pinnedDate)
+      const free = pending.filter((p) => !p.pinnedDate)
+
+      for (const p of pinned) {
+        while (p.pinnedDate! > dates[dates.length - 1]) {
+          dates.push(addDays(dates[dates.length - 1], 1))
+        }
+      }
+
+      // Una prenotazione in un giorno ormai passato non è recuperabile:
+      // la si tratta come libera, altrimenti sparisce dal programma.
+      const pinnedByDay = dates.map((d) => pinned.filter((p) => p.pinnedDate === d))
+      const orphaned = pinned.filter((p) => !dates.includes(p.pinnedDate!))
+      const toDistribute = [...free, ...orphaned]
+
+      const capacity = dates.map((d) => dayCapacityMinutes(d))
+      const totalCapacity = capacity.reduce((s, c) => s + c, 0)
+
+      // Se il programma non ci sta, si accorciano le visite invece di
+      // lasciare tappe indietro: meglio un'ora al museo che nessuna.
+      const compression = compressToFit(pending, totalCapacity)
+      const byId = new Map(compression.pois.map((p) => [p.id, p]))
+      const sized = (p: Poi) => byId.get(p.id) ?? p
+
+      const preload = pinnedByDay.map((ps) =>
+        ps.reduce((s, p) => s + sized(p).durationMin, 0),
+      )
+
+      const groups = splitByArea(
+        toDistribute.map(sized),
+        dates.length,
+        preload,
+        capacity,
+      )
+
+      // Prima la ripartizione, poi il trabocco: ciò che non entra prima
+      // della chiusura scivola al giorno dopo invece di restare pianificato
+      // a museo chiuso.
+      const spread = dates.map((date, i) => ({
+        date,
+        pois: orderByBookings(
+          [...pinnedByDay[i].map(sized), ...(groups[i] ?? [])],
+          dayStartMinutes(date),
+        ),
+      }))
+
+      const newDays = spillOverflow(spread).map((d, i) => ({
+        date: d.date,
+        poiIds: [
+          ...(i === 0 ? visited.map((p) => p.id) : []),
+          ...orderByBookings(d.pois, dayStartMinutes(d.date)).map((p) => p.id),
+        ],
+      }))
+
+      const todayIdx = newDays.findIndex((d) => d.date === today)
+      const todayLoad =
+        todayIdx >= 0
+          ? newDays[todayIdx].poiIds
+              .map((id) => t.pois[id])
+              .filter((p) => p && !p.visitedAt)
+              .reduce((s, p) => s + p.durationMin, 0)
+          : 0
+
+      summary = {
+        movedToday: todayIdx >= 0 ? newDays[todayIdx].poiIds.length - visited.length : 0,
+        remainingDays: dates.length,
+        todayMinutes: todayLoad,
+        overflow: compression.stillOver,
+        compressedMin: compression.savedMin,
+        compressedCount: compression.affected,
+      }
+
+      // Le giornate passate restano, ma svuotate di ciò che non è stato fatto.
+      const past = t.days
+        .filter((d) => d.date < today)
+        .map((d) => ({
+          ...d,
+          poiIds: d.poiIds.filter((id) => t.pois[id]?.visitedAt),
+        }))
+
+      // Le durate compresse (o ripristinate) vanno salvate.
+      const pois = { ...t.pois }
+      for (const p of compression.pois) pois[p.id] = p
+
+      return { ...t, pois, days: [...past, ...newDays] }
+    })
+
+    setDayIndex(0)
+    return summary
+  }, [])
+
+  /**
    * Ridistribuisce le tappe del viaggio su N giornate raggruppandole per
    * zona.
    *
@@ -313,6 +455,7 @@ export default function App() {
             onTogglePin={togglePin}
             onSetBooking={setBooking}
             onClearBooking={clearBooking}
+            onReplan={replanFromNow}
             onRemove={removePoi}
             onReorder={reorder}
             onUpdate={updatePoi}

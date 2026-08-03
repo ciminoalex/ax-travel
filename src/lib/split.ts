@@ -23,8 +23,16 @@ import { haversineM } from './geo'
  * @param preloadMin minuti già occupati in ciascuna giornata da tappe
  *   bloccate lì da una prenotazione. Una giornata che ne ha già tre ore
  *   deve riceverne meno delle altre, altrimenti il pareggio è finto.
+ * @param capacityMin quante ore di visita ciascuna giornata può davvero
+ *   reggere. Serve per oggi: alle 17:00 non restano sei ore, e dividere in
+ *   parti uguali produrrebbe un programma impossibile.
  */
-export function splitByArea(pois: Poi[], days: number, preloadMin?: number[]): Poi[][] {
+export function splitByArea(
+  pois: Poi[],
+  days: number,
+  preloadMin?: number[],
+  capacityMin?: number[],
+): Poi[][] {
   const k = Math.max(1, Math.min(days, Math.max(1, pois.length)))
   if (pois.length === 0) return Array.from({ length: days }, () => [])
   if (k === 1) return [pois]
@@ -35,7 +43,7 @@ export function splitByArea(pois: Poi[], days: number, preloadMin?: number[]): P
   }
 
   const ordered = orderAlongMainAxis(pois)
-  return partitionByTime(ordered, k, preloadMin ?? [])
+  return partitionByTime(ordered, k, preloadMin ?? [], capacityMin)
 }
 
 /**
@@ -84,19 +92,43 @@ function orderAlongMainAxis(pois: Poi[]): Poi[] {
  * al quadrato dal tempo medio, così una giornata mostruosa pesa molto più
  * di due leggermente sbilanciate.
  */
-function partitionByTime(ordered: Poi[], k: number, preload: number[]): Poi[][] {
+function partitionByTime(
+  ordered: Poi[],
+  k: number,
+  preload: number[],
+  capacity?: number[],
+): Poi[][] {
   const n = ordered.length
   const free = ordered.reduce((s, p) => s + p.durationMin, 0)
   const booked = preload.reduce((s, m) => s + m, 0)
+  const total = free + booked
 
-  // Il pareggio è sul totale della giornata, prenotazioni comprese.
-  const target = (free + booked) / k
+  /**
+   * Il carico che spetta a ciascuna giornata. Senza capacità dichiarate si
+   * divide in parti uguali; con le capacità, in proporzione — una giornata
+   * che ne ha metà riceve metà lavoro invece di annegare.
+   */
+  const totalCapacity = capacity?.reduce((s, c) => s + c, 0) ?? 0
+  const targetFor = (day: number) =>
+    capacity && totalCapacity > 0 ? (total * (capacity[day] ?? 0)) / totalCapacity : total / k
+
+  /**
+   * Sforare la capacità pesa molto più che restare sotto: una giornata
+   * leggera si riempie a piacere, una troppo carica finisce a musei chiusi.
+   * Senza questa asimmetria il minimo scarto quadratico infila volentieri
+   * l'ultima tappa oltre l'orario di chiusura.
+   */
+  const OVER_PENALTY = 4
 
   // prefix[i] = minuti delle prime i tappe
   const prefix = [0]
   for (let i = 0; i < n; i++) prefix.push(prefix[i] + ordered[i].durationMin)
-  const segment = (a: number, b: number, day: number) =>
-    (prefix[b] - prefix[a] + (preload[day] ?? 0) - target) ** 2
+  const segment = (a: number, b: number, day: number) => {
+    const loadOfDay = prefix[b] - prefix[a] + (preload[day] ?? 0)
+    const base = (loadOfDay - targetFor(day)) ** 2
+    const cap = capacity?.[day]
+    return cap != null && loadOfDay > cap ? base * OVER_PENALTY : base
+  }
 
   const cost: number[][] = Array.from({ length: n + 1 }, () => Array(k + 1).fill(Infinity))
   const cut: number[][] = Array.from({ length: n + 1 }, () => Array(k + 1).fill(0))

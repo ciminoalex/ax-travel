@@ -33,6 +33,33 @@ export function dayStartMinutes(dateISO: string, now = new Date()): number {
   return Math.max(DAY_START_MIN, nowMin)
 }
 
+/** Oltre quest'ora non si pianificano visite: i musei hanno chiuso. */
+export const DAY_END_MIN = 20 * 60
+
+/** Ore di visita che ci si può ragionevolmente mettere in una giornata. */
+export const COMFORTABLE_DAY_MIN = 6 * 60
+
+/**
+ * Quota del tempo disponibile che diventa davvero visita.
+ *
+ * Il resto se ne va in spostamenti: fra tre tappe ci sono tre tragitti, che
+ * a Londra valgono un'ora e mezza. Contare la finestra intera come tempo
+ * di visita produce programmi che finiscono dopo la chiusura dei musei.
+ */
+const VISIT_SHARE = 0.72
+
+/**
+ * Quante ore di visita restano davvero in una giornata.
+ *
+ * Per oggi è ciò che avanza da adesso alla chiusura, al netto degli
+ * spostamenti: alle 17:00 restano un paio d'ore di museo, non tre.
+ */
+export function dayCapacityMinutes(dateISO: string, now = new Date()): number {
+  const start = dayStartMinutes(dateISO, now)
+  const window = Math.max(0, DAY_END_MIN - start)
+  return Math.min(COMFORTABLE_DAY_MIN, Math.round(window * VISIT_SHARE))
+}
+
 export function orderByBookings(pois: Poi[], startMin = DAY_START_MIN): Poi[] {
   const booked = pois
     .filter((p) => parseTime(p.pinnedTime) != null)
@@ -64,5 +91,48 @@ export function orderByBookings(pois: Poi[], startMin = DAY_START_MIN): Poi[] {
 
   // Ciò che non entrava prima delle prenotazioni viene dopo.
   out.push(...free.slice(i))
+  return out
+}
+
+/**
+ * Fa scivolare al giorno seguente le tappe che non entrano prima della
+ * chiusura.
+ *
+ * Serve quando il viaggio è più pieno del tempo disponibile: la divisione
+ * sceglie comunque la ripartizione con lo scarto minore, e può lasciare
+ * l'ultima tappa a sera inoltrata. Meglio spostarla che pianificare una
+ * visita a museo chiuso.
+ *
+ * Non tocca le tappe con una data fissata: quelle stanno dove hai deciso.
+ */
+export function spillOverflow(days: { date: string; pois: Poi[] }[]): typeof days {
+  const out = days.map((d) => ({ ...d, pois: [...d.pois] }))
+
+  for (let i = 0; i < out.length; i++) {
+    const start = dayStartMinutes(out[i].date)
+    const ordered = orderByBookings(out[i].pois, start)
+
+    const keep: Poi[] = []
+    const spill: Poi[] = []
+    let clock = start
+
+    for (const p of ordered) {
+      const booked = parseTime(p.pinnedTime)
+      const arrive = booked != null ? Math.max(clock + TRAVEL_GUESS_MIN, booked) : clock + TRAVEL_GUESS_MIN
+
+      const movable = !p.pinnedDate && i + 1 < out.length
+      if (movable && arrive >= DAY_END_MIN) {
+        spill.push(p)
+        continue
+      }
+
+      keep.push(p)
+      clock = arrive + p.durationMin
+    }
+
+    out[i].pois = keep
+    if (spill.length > 0) out[i + 1].pois.unshift(...spill)
+  }
+
   return out
 }
