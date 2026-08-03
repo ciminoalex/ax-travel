@@ -19,13 +19,23 @@ import { haversineM } from './geo'
  * Tagliare una sequenza ordinata tiene insieme le tappe vicine per
  * costruzione: ogni giornata è un tratto continuo di città.
  */
-export function splitByArea(pois: Poi[], days: number): Poi[][] {
-  const k = Math.max(1, Math.min(days, pois.length))
+/**
+ * @param preloadMin minuti già occupati in ciascuna giornata da tappe
+ *   bloccate lì da una prenotazione. Una giornata che ne ha già tre ore
+ *   deve riceverne meno delle altre, altrimenti il pareggio è finto.
+ */
+export function splitByArea(pois: Poi[], days: number, preloadMin?: number[]): Poi[][] {
+  const k = Math.max(1, Math.min(days, Math.max(1, pois.length)))
+  if (pois.length === 0) return Array.from({ length: days }, () => [])
   if (k === 1) return [pois]
-  if (pois.length <= k) return pois.map((p) => [p])
+  if (pois.length <= k) {
+    const out: Poi[][] = Array.from({ length: days }, () => [])
+    pois.forEach((p, i) => out[i].push(p))
+    return out
+  }
 
   const ordered = orderAlongMainAxis(pois)
-  return partitionByTime(ordered, k)
+  return partitionByTime(ordered, k, preloadMin ?? [])
 }
 
 /**
@@ -74,14 +84,19 @@ function orderAlongMainAxis(pois: Poi[]): Poi[] {
  * al quadrato dal tempo medio, così una giornata mostruosa pesa molto più
  * di due leggermente sbilanciate.
  */
-function partitionByTime(ordered: Poi[], k: number): Poi[][] {
+function partitionByTime(ordered: Poi[], k: number, preload: number[]): Poi[][] {
   const n = ordered.length
-  const target = ordered.reduce((s, p) => s + p.durationMin, 0) / k
+  const free = ordered.reduce((s, p) => s + p.durationMin, 0)
+  const booked = preload.reduce((s, m) => s + m, 0)
+
+  // Il pareggio è sul totale della giornata, prenotazioni comprese.
+  const target = (free + booked) / k
 
   // prefix[i] = minuti delle prime i tappe
   const prefix = [0]
   for (let i = 0; i < n; i++) prefix.push(prefix[i] + ordered[i].durationMin)
-  const segment = (a: number, b: number) => (prefix[b] - prefix[a] - target) ** 2
+  const segment = (a: number, b: number, day: number) =>
+    (prefix[b] - prefix[a] + (preload[day] ?? 0) - target) ** 2
 
   const cost: number[][] = Array.from({ length: n + 1 }, () => Array(k + 1).fill(Infinity))
   const cut: number[][] = Array.from({ length: n + 1 }, () => Array(k + 1).fill(0))
@@ -92,7 +107,7 @@ function partitionByTime(ordered: Poi[], k: number): Poi[][] {
       // Ogni giornata deve avere almeno una tappa: da qui i limiti su m.
       for (let m = j - 1; m < i; m++) {
         if (cost[m][j - 1] === Infinity) continue
-        const c = cost[m][j - 1] + segment(m, i)
+        const c = cost[m][j - 1] + segment(m, i, j - 1)
         if (c < cost[i][j]) {
           cost[i][j] = c
           cut[i][j] = m

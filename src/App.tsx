@@ -115,6 +115,54 @@ export default function App() {
     [safeIndex],
   )
 
+  /** Blocca (o libera) una tappa nella giornata in cui si trova. */
+  const togglePin = useCallback(
+    (poiId: string) => {
+      setTrip((t) => {
+        const poi = t.pois[poiId]
+        if (!poi) return t
+        const date = t.days.find((d) => d.poiIds.includes(poiId))?.date
+        if (!date) return t
+        return {
+          ...t,
+          pois: {
+            ...t.pois,
+            [poiId]: { ...poi, pinnedDate: poi.pinnedDate ? undefined : date },
+          },
+        }
+      })
+    },
+    [],
+  )
+
+  /**
+   * "Oggi il museo è pieno": sposta la tappa al giorno dopo e la blocca lì,
+   * creando la giornata se non c'è. Senza il blocco, la prima
+   * riorganizzazione la riporterebbe indietro.
+   */
+  const deferToNextDay = useCallback((poiId: string) => {
+    setTrip((t) => {
+      const poi = t.pois[poiId]
+      const fromIndex = t.days.findIndex((d) => d.poiIds.includes(poiId))
+      if (!poi || fromIndex === -1) return t
+
+      const days = t.days.map((d) => ({ ...d, poiIds: [...d.poiIds] }))
+      const targetIndex = fromIndex + 1
+      if (!days[targetIndex]) {
+        days.push({ date: addDays(days[days.length - 1].date, 1), poiIds: [] })
+      }
+
+      days[fromIndex].poiIds = days[fromIndex].poiIds.filter((x) => x !== poiId)
+      days[targetIndex].poiIds.push(poiId)
+
+      return {
+        ...t,
+        days,
+        pois: { ...t.pois, [poiId]: { ...poi, pinnedDate: days[targetIndex].date } },
+      }
+    })
+  }, [])
+
   const addDay = useCallback(() => {
     setTrip((t) => {
       const last = t.days.at(-1)
@@ -137,9 +185,13 @@ export default function App() {
   }, [])
 
   /**
-   * Ridistribuisce tutte le tappe del viaggio su N giornate raggruppandole
-   * per zona. Le tappe già visitate restano dove sono: riorganizzare il
-   * passato non serve a nessuno.
+   * Ridistribuisce le tappe del viaggio su N giornate raggruppandole per
+   * zona.
+   *
+   * Restano ferme due categorie: le tappe già visitate (riorganizzare il
+   * passato non serve) e quelle bloccate a una data — una prenotazione o un
+   * museo che oggi è pieno non si spostano perché fa comodo all'algoritmo.
+   * Le loro ore però pesano sul bilanciamento delle giornate.
    */
   const splitAcrossDays = useCallback((days: number) => {
     setTrip((t) => {
@@ -148,18 +200,36 @@ export default function App() {
       const pending = all.filter((p) => !p.visitedAt)
       if (pending.length === 0) return t
 
-      const groups = splitByArea(pending, days)
-      // Se il viaggio era stato impostato in un giorno ormai passato, le
-      // nuove giornate nascerebbero già scadute: si riparte da oggi.
       const first = t.days[0]?.date ?? todayISO()
       const startDate = first < todayISO() ? todayISO() : first
+      const dates = Array.from({ length: days }, (_, i) => addDays(startDate, i))
 
-      const newDays = groups.map((g, i) => ({
-        date: addDays(startDate, i),
-        poiIds: [...(i === 0 ? visited.map((p) => p.id) : []), ...g.map((p) => p.id)],
+      const pinned = pending.filter((p) => p.pinnedDate)
+      const free = pending.filter((p) => !p.pinnedDate)
+
+      // Una tappa bloccata oltre l'ultima giornata la trascina con sé:
+      // meglio un giorno in più che perdere il vincolo.
+      for (const p of pinned) {
+        while (p.pinnedDate! > dates[dates.length - 1]) {
+          dates.push(addDays(dates[dates.length - 1], 1))
+        }
+      }
+
+      const pinnedByDay = dates.map((d) => pinned.filter((p) => p.pinnedDate === d))
+      const preload = pinnedByDay.map((ps) => ps.reduce((s, p) => s + p.durationMin, 0))
+
+      const groups = splitByArea(free, dates.length, preload)
+
+      const newDays = dates.map((date, i) => ({
+        date,
+        poiIds: [
+          ...(i === 0 ? visited.map((p) => p.id) : []),
+          ...pinnedByDay[i].map((p) => p.id),
+          ...(groups[i] ?? []).map((p) => p.id),
+        ],
       }))
 
-      return { ...t, days: newDays.length > 0 ? newDays : t.days }
+      return { ...t, days: newDays }
     })
     setDayIndex(0)
   }, [])
@@ -185,6 +255,8 @@ export default function App() {
             onRemoveDay={removeDay}
             onSplit={splitAcrossDays}
             onMoveToDay={moveToDay}
+            onDefer={deferToNextDay}
+            onTogglePin={togglePin}
             onRemove={removePoi}
             onReorder={reorder}
             onUpdate={updatePoi}

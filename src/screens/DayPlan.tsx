@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Poi, Trip } from '../lib/types'
-import { optimizeDay } from '../lib/optimize'
+import { formatTime, optimizeDay } from '../lib/optimize'
 import { describeError, enrichPlaces, hasApiKey, reorderDay } from '../lib/ai'
 import { areaLabel } from '../lib/split'
 
@@ -13,6 +13,9 @@ type Props = {
   onRemoveDay: (i: number) => void
   onSplit: (days: number) => void
   onMoveToDay: (poiId: string, day: number) => void
+  /** Sposta al giorno dopo e blocca lì: "oggi il museo è pieno". */
+  onDefer: (poiId: string) => void
+  onTogglePin: (poiId: string) => void
   onRemove: (id: string) => void
   onReorder: (from: number, to: number) => void
   onUpdate: (id: string, patch: Partial<Poi>) => void
@@ -45,7 +48,7 @@ export default function DayPlan(props: Props) {
     setBusy({ kind: 'optimize', done: 0, total: 1, step: 'Calcolo i tempi tra le tappe…' })
     setNotice(null)
     try {
-      const { orderedIds, degraded, skipped } = await optimizeDay(
+      const { orderedIds, degraded, skipped, schedule } = await optimizeDay(
         pending,
         trip.hotel,
         trip.walkPenalty,
@@ -83,7 +86,27 @@ export default function DayPlan(props: Props) {
 
       const visitedIds = dayPois.filter((p) => p.visitedAt).map((p) => p.id)
       props.onSetOrder([...visitedIds, ...finalIds])
-      setNotice({ tone: degraded ? 'warn' : 'ok', lines })
+
+      // Gli orari proposti: è ciò che porti al portale delle prenotazioni.
+      // Vengono riscritti a ogni ottimizzazione, quelli già prenotati no.
+      for (const entry of schedule) {
+        const poi = pending.find((p) => p.id === entry.poiId)
+        if (poi && !poi.pinnedTime) {
+          onUpdate(entry.poiId, { suggestedTime: formatTime(entry.arriveMin) })
+        }
+      }
+
+      const late = schedule.filter((e) => e.lateBy && e.lateBy > 0)
+      for (const e of late) {
+        const poi = pending.find((p) => p.id === e.poiId)
+        if (poi) {
+          lines.push(
+            `Attenzione: a ${poi.name} arriveresti ${e.lateBy} min dopo le ${poi.pinnedTime}.`,
+          )
+        }
+      }
+
+      setNotice({ tone: degraded || late.length > 0 ? 'warn' : 'ok', lines })
     } catch (e) {
       setNotice({ tone: 'warn', lines: [describeError(e)] })
     } finally {
@@ -225,6 +248,8 @@ export default function DayPlan(props: Props) {
                       )}
                       {p.bestTimeOfDay && <span>meglio {p.bestTimeOfDay}</span>}
                     </div>
+
+                    <TimeRow poi={p} onUpdate={onUpdate} />
                     {p.openingHours && (
                       <p className="mt-1 text-xs text-amber-500/70">
                         orari {p.openingHours} — da verificare
@@ -274,6 +299,30 @@ export default function DayPlan(props: Props) {
                     </button>
                   )}
 
+                  {!p.visitedAt && (
+                    <button
+                      onClick={() => props.onDefer(p.id)}
+                      title="Oggi non c'è posto: sposta a domani e blocca lì"
+                      className="rounded-lg bg-slate-800 px-3 py-1.5 active:bg-slate-700"
+                    >
+                      Non oggi
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => props.onTogglePin(p.id)}
+                    title={
+                      p.pinnedDate
+                        ? 'Liberala: potrà essere spostata riorganizzando'
+                        : 'Blocca in questa giornata'
+                    }
+                    className={`rounded-lg px-3 py-1.5 active:bg-slate-700 ${
+                      p.pinnedDate ? 'bg-amber-900/60 text-amber-200' : 'bg-slate-800'
+                    }`}
+                  >
+                    {p.pinnedDate ? '📌 fissata' : '📌'}
+                  </button>
+
                   <button
                     onClick={() => props.onRemove(p.id)}
                     className="ml-auto rounded-lg px-3 py-1.5 text-rose-400 active:bg-rose-950/50"
@@ -305,6 +354,96 @@ export default function DayPlan(props: Props) {
           </ul>
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * L'orario di una tappa, nei suoi due stati.
+ *
+ * Suggerito: la proposta dell'app, ricalcolata a ogni ottimizzazione — è
+ * l'ora da chiedere al portale del museo.
+ * Prenotato: quello che hai davvero ottenuto. Da lì in poi è un vincolo, e
+ * nessuna riorganizzazione lo tocca.
+ */
+function TimeRow({ poi, onUpdate }: { poi: Poi; onUpdate: Props['onUpdate'] }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(poi.pinnedTime ?? poi.suggestedTime ?? '')
+
+  if (poi.pinnedTime && !editing) {
+    return (
+      <div className="mt-1 flex items-center gap-2">
+        <span className="rounded bg-emerald-900/70 px-2 py-0.5 text-xs font-semibold text-emerald-200">
+          🎟️ prenotato {poi.pinnedTime}
+        </span>
+        <button
+          onClick={() => {
+            setValue(poi.pinnedTime ?? '')
+            setEditing(true)
+          }}
+          className="text-xs text-slate-500 underline active:text-slate-300"
+        >
+          modifica
+        </button>
+      </div>
+    )
+  }
+
+  if (editing) {
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        <input
+          type="time"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="rounded-lg bg-slate-800 px-2 py-1 text-xs text-slate-100 outline-none ring-1 ring-slate-700 focus:ring-sky-600"
+        />
+        <button
+          onClick={() => {
+            onUpdate(poi.id, { pinnedTime: value || undefined })
+            setEditing(false)
+          }}
+          className="rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-semibold active:bg-emerald-800"
+        >
+          Conferma
+        </button>
+        {poi.pinnedTime && (
+          <button
+            onClick={() => {
+              onUpdate(poi.id, { pinnedTime: undefined })
+              setEditing(false)
+            }}
+            className="rounded-lg px-2 py-1 text-xs text-rose-400 active:bg-rose-950/50"
+          >
+            Annulla prenotazione
+          </button>
+        )}
+        <button
+          onClick={() => setEditing(false)}
+          className="text-xs text-slate-500 underline active:text-slate-300"
+        >
+          chiudi
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      {poi.suggestedTime ? (
+        <span className="text-xs text-sky-300/80">🕐 arrivo previsto {poi.suggestedTime}</span>
+      ) : (
+        <span className="text-xs text-slate-600">nessun orario</span>
+      )}
+      <button
+        onClick={() => {
+          setValue(poi.suggestedTime ?? '')
+          setEditing(true)
+        }}
+        className="text-xs text-slate-500 underline active:text-slate-300"
+      >
+        ho prenotato
+      </button>
     </div>
   )
 }

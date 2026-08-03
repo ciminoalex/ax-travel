@@ -10,6 +10,29 @@ export type Poi = {
   /** Se valorizzato (ISO), il posto è visitato. Dà anche la cronologia gratis. */
   visitedAt?: string
 
+  /**
+   * Giornata a cui la tappa è legata (ISO date). La usa chi ha una
+   * prenotazione, o chi ha scoperto che oggi il museo è pieno e deve
+   * rimandare: riorganizzare il giro non deve spostarla altrove.
+   */
+  pinnedDate?: string
+
+  /**
+   * Ora della prenotazione confermata, "HH:MM".
+   *
+   * Una volta che hai prenotato sul portale del museo questo orario è
+   * scolpito: vincola l'ordine dell'intera giornata e nessuna
+   * riorganizzazione può spostarlo. Da non confondere con `suggestedTime`.
+   */
+  pinnedTime?: string
+
+  /**
+   * Ora a cui l'app prevede che arriverai, ricalcolata a ogni
+   * ottimizzazione. È la proposta da portare al portale delle
+   * prenotazioni, non un impegno: cambia quando cambia il giro.
+   */
+  suggestedTime?: string
+
   // Campi riempiti dall'AI in fase B — opzionali, l'app funziona senza.
   category?: string
   /** Orari indicativi dal modello: da mostrare sempre con badge "da verificare". */
