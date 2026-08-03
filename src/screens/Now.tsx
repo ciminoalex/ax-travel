@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Journey, Poi, ScoredStop, Trip } from '../lib/types'
-import { bestJourney } from '../lib/journeyCost'
+import { bestJourney, journeyCost, journeyOptions } from '../lib/journeyCost'
 import {
   formatDistance,
   getCurrentPosition,
@@ -153,7 +153,14 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
         </p>
       )}
 
-      {best && <BestCard stop={best} pos={state.pos} onVisited={() => onVisit(best.poi.id, { visitedAt: new Date().toISOString() })} />}
+      {best && (
+        <BestCard
+          stop={best}
+          pos={state.pos}
+          walkPenalty={trip.walkPenalty}
+          onVisited={() => onVisit(best.poi.id, { visitedAt: new Date().toISOString() })}
+        />
+      )}
 
       {others.length > 0 && (
         <section className="mt-6">
@@ -203,10 +210,12 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
 function BestCard({
   stop,
   pos,
+  walkPenalty,
   onVisited,
 }: {
   stop: ScoredStop
   pos: LatLng
+  walkPenalty: number
   onVisited: () => void
 }) {
   const { poi, journey } = stop
@@ -234,17 +243,8 @@ function BestCard({
             </div>
           </div>
 
-          <ol className="mt-4 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-slate-300">
-            {journey.legs.map((l, i) => (
-              <li key={i} className="flex items-center gap-1.5">
-                {i > 0 && <span className="text-slate-600">→</span>}
-                <span>
-                  {modeIcon(l.mode)} {l.label}
-                  <span className="text-slate-500"> {l.durationMin}′</span>
-                </span>
-              </li>
-            ))}
-          </ol>
+          <Legs journey={journey} className="mt-4 text-sm" />
+          <Alternatives from={pos} to={poi} walkPenalty={walkPenalty} chosen={journey} />
         </>
       ) : (
         <p className="mt-5 text-slate-300">
@@ -267,6 +267,111 @@ function BestCard({
         </button>
       </div>
     </section>
+  )
+}
+
+/** I mezzi in fila, con i minuti di ogni tratta. */
+function Legs({ journey, className = '' }: { journey: Journey; className?: string }) {
+  return (
+    <ol className={`flex flex-wrap items-center gap-x-1.5 gap-y-1 text-slate-300 ${className}`}>
+      {journey.legs.map((l, i) => (
+        <li key={i} className="flex items-center gap-1.5">
+          {i > 0 && <span className="text-slate-600">→</span>}
+          <span>
+            {modeIcon(l.mode)} {l.label}
+            <span className="text-slate-500"> {l.durationMin}′</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+/**
+ * Le altre strade possibili.
+ *
+ * L'app sceglie col costo composito — velocità più camminata contata
+ * doppia — ma TfL e Google non pescano dagli stessi dati e non sempre
+ * propongono gli stessi percorsi. Quando il suggerimento sorprende, qui
+ * si vede l'elenco intero e il perché di quella scelta, invece di doverla
+ * prendere per buona.
+ *
+ * Si carica solo su richiesta: è un secondo giro di chiamate a un'API
+ * gratuita, non qualcosa da fare a ogni apertura.
+ */
+function Alternatives({
+  from,
+  to,
+  walkPenalty,
+  chosen,
+}: {
+  from: LatLng
+  to: LatLng
+  walkPenalty: number
+  chosen: Journey
+}) {
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [options, setOptions] = useState<Journey[] | null>(null)
+
+  async function load() {
+    setState('loading')
+    try {
+      setOptions(await journeyOptions(from, to, walkPenalty))
+      setState('idle')
+    } catch {
+      setState('error')
+    }
+  }
+
+  if (!options) {
+    return (
+      <button
+        onClick={() => void load()}
+        disabled={state === 'loading'}
+        className="mt-3 text-xs text-sky-400 underline active:text-sky-200 disabled:opacity-50"
+      >
+        {state === 'loading'
+          ? 'Cerco altre strade…'
+          : state === 'error'
+            ? 'Non riesco a caricarle, riprova'
+            : 'Altre strade possibili'}
+      </button>
+    )
+  }
+
+  const same = (j: Journey) =>
+    j.durationMin === chosen.durationMin && j.walkingMin === chosen.walkingMin
+
+  return (
+    <div className="mt-4 rounded-xl bg-slate-950/50 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Altre strade possibili
+      </p>
+      <ul className="mt-2 space-y-2">
+        {options.map((j, i) => (
+          <li
+            key={i}
+            className={`rounded-lg px-2.5 py-2 ${
+              same(j) ? 'bg-sky-950/60 ring-1 ring-sky-800/60' : 'bg-slate-900/60'
+            }`}
+          >
+            <p className="text-sm">
+              <span className="font-semibold tabular-nums">{j.durationMin} min</span>
+              <span className="text-slate-400"> · 🚶 {j.walkingMin} a piedi</span>
+              {same(j) && <span className="text-sky-400"> · scelto</span>}
+            </p>
+            <Legs journey={j} className="mt-1 text-xs" />
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-xs leading-relaxed text-slate-500">
+        L'ordine tiene conto sia della durata sia dei minuti a piedi, che pesano il doppio
+        (il primo qui costa {Math.round(journeyCost(options[0], walkPenalty))} contro{' '}
+        {Math.round(journeyCost(options[options.length - 1], walkPenalty))} dell'ultimo). Google
+        ordina per sola durata, perciò può proporre percorsi diversi — e non pesca dagli stessi
+        dati di TfL.
+      </p>
+    </div>
   )
 }
 
@@ -376,17 +481,8 @@ function HomeRoute({ hotel, pos, walkPenalty }: { hotel: Poi; pos?: LatLng; walk
                 <p className="text-xs uppercase tracking-wide text-slate-400">a piedi</p>
               </div>
             </div>
-            <ol className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-slate-300">
-              {journey.legs.map((l, i) => (
-                <li key={i} className="flex items-center gap-1.5">
-                  {i > 0 && <span className="text-slate-600">→</span>}
-                  <span>
-                    {modeIcon(l.mode)} {l.label}
-                    <span className="text-slate-500"> {l.durationMin}′</span>
-                  </span>
-                </li>
-              ))}
-            </ol>
+            <Legs journey={journey} className="mt-3 text-sm" />
+            <Alternatives from={from} to={hotel} walkPenalty={walkPenalty} chosen={journey} />
           </>
         ) : (
           <p className="mt-2 text-sm text-amber-300">
