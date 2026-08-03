@@ -19,7 +19,9 @@ import {
   IconMap,
   IconPin,
   IconRefresh,
+  IconTicket,
   IconWalk,
+  IconWarn,
 } from '../components/Icon'
 
 type Props = {
@@ -187,7 +189,11 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
               <li key={s.poi.id}>
                 <button
                   onClick={() => openMaps(mapsTransitUrl(state.pos, s.poi))}
-                  className="flex w-full items-center gap-3 rounded-[4px] bg-ink/[0.035] px-4 py-3 text-left first:rounded-t-2xl last:rounded-b-2xl active:bg-ink/[0.06]"
+                  className={`flex w-full items-center gap-3 rounded-[4px] bg-ink/[0.035] px-4 py-3 text-left first:rounded-t-2xl last:rounded-b-2xl active:bg-ink/[0.06] ${
+                    // Non ancora il suo momento: resta in lista, ma non
+                    // deve sembrare un invito ad andarci adesso.
+                    s.tooEarly ? 'opacity-55' : ''
+                  }`}
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-base font-semibold">{s.poi.name}</span>
@@ -196,6 +202,21 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
                         ? `${s.journey.durationMin} min · ${s.journey.walkingMin} a piedi`
                         : `~${formatDistance(s.straightLineM)} in linea d'aria`}
                     </span>
+
+                    {s.bookingSlackMin != null && s.poi.pinnedTime && (
+                      <span
+                        className={`block text-[13px] ${
+                          s.bookingSlackMin < 0 ? 'text-terra' : 'text-moss-mid'
+                        }`}
+                      >
+                        prenotato {s.poi.pinnedTime} · {describeSlack(s.bookingSlackMin)}
+                      </span>
+                    )}
+                    {s.clashesWith && (
+                      <span className="block text-[13px] text-amber">
+                        ti farebbe perdere {s.clashesWith}
+                      </span>
+                    )}
                   </span>
                   <IconChevron size={17} width={2} className="shrink-0 text-fainter" />
                 </button>
@@ -220,6 +241,23 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   )
 }
 
+/**
+ * Il margine sulla prenotazione, detto come lo diresti a voce.
+ *
+ * Il numero da solo ("slack 118") non aiuta nessuno: quello che serve
+ * sapere camminando è se devi correre, se puoi girare un po', o se è
+ * troppo presto per andarci.
+ */
+function describeSlack(slackMin: number): string {
+  if (slackMin < 0) return `${-slackMin} min di ritardo`
+  if (slackMin < 10) return 'sei giusto in tempo'
+  if (slackMin <= 30) return `${slackMin} min di attesa`
+  const h = Math.floor(slackMin / 60)
+  const m = slackMin % 60
+  const quanto = h > 0 ? `${h} h${m ? ` ${m}` : ''}` : `${m} min`
+  return `fra ${quanto} — troppo presto`
+}
+
 function BestCard({
   stop,
   pos,
@@ -239,6 +277,38 @@ function BestCard({
         {poi.name}
       </h2>
       {poi.address && <p className="mt-1 text-sm text-soft">{poi.address}</p>}
+
+      {/* Se questa tappa ha un biglietto, l'ora viene prima di tutto: è
+          l'unico dato che non puoi rinegoziare camminando. */}
+      {stop.bookingSlackMin != null && poi.pinnedTime && (
+        <div
+          className={`mt-3 flex items-center gap-2.5 rounded-xl px-3 py-2.5 ${
+            stop.bookingSlackMin < 0
+              ? 'bg-terra/10 text-terra-deep'
+              : 'bg-moss-mid/10 text-moss'
+          }`}
+        >
+          <IconTicket size={16} className="shrink-0" />
+          {/* Impilate di proposito: su 375 px le due frasi non stanno su
+              una riga, e lasciarle andare a capo da sole le spezzava a
+              metà. Il margine è la seconda cosa che leggi, non un'aggiunta
+              in coda. */}
+          <div className="min-w-0">
+            <p className="tnum text-sm font-semibold">Prenotato {poi.pinnedTime}</p>
+            <p className="text-[13px] opacity-80">{describeSlack(stop.bookingSlackMin)}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Una tappa libera che ti mangerebbe la prenotazione. */}
+      {stop.clashesWith && (
+        <p className="mt-3 flex items-start gap-2 rounded-xl border border-[rgba(180,120,20,0.4)] bg-[rgba(200,140,30,0.09)] px-3 py-2.5 text-[13px] leading-relaxed text-amber-deep">
+          <IconWarn size={15} className="mt-0.5 shrink-0" />
+          <span>
+            Non ne usciresti in tempo per <b>{stop.clashesWith}</b>.
+          </span>
+        </p>
+      )}
 
       {journey ? (
         <>

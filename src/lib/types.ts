@@ -103,6 +103,25 @@ export type ScoredStop = {
   estimated: boolean
   /** Distanza in linea d'aria in metri — usata per il fallback e da mostrare. */
   straightLineM: number
+
+  /**
+   * Minuti di margine sulla prenotazione, calcolati sull'ora di arrivo:
+   * positivo = arrivi in anticipo e aspetti, negativo = arrivi tardi.
+   * Assente se la tappa non ha una prenotazione per oggi.
+   */
+  bookingSlackMin?: number
+
+  /**
+   * La prenotazione c'è, ma è ancora troppo in là: andarci adesso
+   * significherebbe aspettare fuori dall'ingresso.
+   */
+  tooEarly?: boolean
+
+  /**
+   * Nome della prenotazione che questa tappa ti farebbe mancare: ci
+   * andresti, e non ne usciresti in tempo.
+   */
+  clashesWith?: string
 }
 
 export const DEFAULT_WALK_PENALTY = 1

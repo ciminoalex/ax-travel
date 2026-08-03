@@ -1,6 +1,7 @@
 import type { Poi, ScoredStop } from './types'
 import { coarse, haversineM, type LatLng } from './geo'
 import { bestJourney, journeyCost } from './journeyCost'
+import { parseTime } from './optimize'
 
 /**
  * Quanti candidati interrogare su TfL. Il pre-filtro geometrico è solo un
@@ -57,6 +58,92 @@ export type NextStopsResult = {
 }
 
 /**
+ * Quanto si è disposti ad aspettare davanti a un ingresso.
+ *
+ * Sotto questa soglia una prenotazione è "il posto dove andare adesso":
+ * ci arrivi e aspetti un quarto d'ora, va bene. Sopra, proporla sarebbe
+ * mandarti a fare anticamera per ore.
+ */
+const EARLY_TOLERANCE_MIN = 30
+
+/** Stima pessimista quando TfL non ha risposto: 4,5 km/h, tutto a piedi. */
+function walkEstimateMin(straightLineM: number): number {
+  return Math.round((straightLineM / 4500) * 60)
+}
+
+/** L'orario della prenotazione *di oggi*, in minuti dalla mezzanotte. */
+function bookingMinutes(poi: Poi, now: Date): number | null {
+  if (!poi.pinnedTime) return null
+  const today = now.toISOString().slice(0, 10)
+  if (poi.pinnedDate && poi.pinnedDate !== today) return null
+  return parseTime(poi.pinnedTime)
+}
+
+/**
+ * Rimette in fila le tappe tenendo conto degli orari, non solo della
+ * distanza.
+ *
+ * Il costo composito da solo diceva "Harrods, 22 minuti" mentre avevi un
+ * biglietto per le 14:20 altrove: una risposta rapida e sbagliata. Un
+ * orario prenotato non è una preferenza, è un vincolo — e prima del suo
+ * momento quella tappa non è nemmeno raggiungibile.
+ *
+ * L'ordine che ne esce:
+ *   1. le prenotazioni per cui è ora di muoversi, la più imminente prima
+ *   2. le tappe libere, per costo composito
+ *   3. le tappe libere che ti farebbero perdere la prenotazione
+ *   4. le prenotazioni ancora troppo lontane
+ *
+ * Resta una funzione pura sull'orologio, così il risultato in cache non
+ * invecchia con l'ora: le annotazioni si ricalcolano a ogni lettura.
+ */
+export function orderByAvailability(stops: ScoredStop[], now = new Date()): ScoredStop[] {
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  const travelOf = (s: ScoredStop) => s.journey?.durationMin ?? walkEstimateMin(s.straightLineM)
+
+  const rows = stops.map((s) => {
+    const booked = bookingMinutes(s.poi, now)
+    return { stop: s, booked, arrive: nowMin + travelOf(s) }
+  })
+
+  // La prenotazione più vicina nel tempo è quella che vincola la giornata.
+  const anchor = rows
+    .filter((r): r is typeof r & { booked: number } => r.booked != null)
+    .sort((a, b) => a.booked - b.booked)[0]
+
+  const annotated: ScoredStop[] = rows.map(({ stop, booked, arrive }) => {
+    if (booked != null) {
+      const slack = booked - arrive
+      return { ...stop, bookingSlackMin: slack, tooEarly: slack > EARLY_TOLERANCE_MIN }
+    }
+
+    // Il conflitto si dichiara solo quando è certo: se non finiresti la
+    // visita nemmeno *prima* dell'ora prenotata, il viaggio per arrivarci
+    // non serve nemmeno contarlo. Meglio tacere che allarmare a vuoto.
+    if (anchor && arrive + stop.poi.durationMin > anchor.booked) {
+      return { ...stop, clashesWith: anchor.stop.poi.name }
+    }
+
+    return stop
+  })
+
+  const rank = (s: ScoredStop): number => {
+    if (s.bookingSlackMin != null) return s.tooEarly ? 3 : 0
+    return s.clashesWith ? 2 : 1
+  }
+
+  return annotated.sort((a, b) => {
+    const byRank = rank(a) - rank(b)
+    if (byRank !== 0) return byRank
+    // Fra prenotazioni vince la più imminente; fra tappe libere, il costo.
+    if (a.bookingSlackMin != null && b.bookingSlackMin != null) {
+      return a.bookingSlackMin - b.bookingSlackMin
+    }
+    return a.cost - b.cost
+  })
+}
+
+/**
  * I prossimi posti da vedere, ordinati dal migliore.
  *
  *   1. scarta i visitati
@@ -80,7 +167,13 @@ export async function computeNextStops(
   const key = cacheKey(pos, pending, walkPenalty)
   const cached = readCache(key)
   if (cached) {
-    return { stops: cached.stops, degraded: cached.degraded, reason: cached.reason }
+    // In cache stanno i tempi di viaggio, che a cinque minuti di distanza
+    // valgono ancora. Il margine sulle prenotazioni no: si rifà adesso.
+    return {
+      stops: orderByAvailability(cached.stops),
+      degraded: cached.degraded,
+      reason: cached.reason,
+    }
   }
 
   const byDistance = pending
@@ -123,15 +216,16 @@ export async function computeNextStops(
     estimate(poi, straightLineM, walkPenalty),
   )
 
-  const stops = [...scored, ...estimated].sort((a, b) => a.cost - b.cost)
+  const measured = [...scored, ...estimated].sort((a, b) => a.cost - b.cost)
 
   // Degradato solo se NESSUNO dei candidati interrogati ha risposto. Le
   // tappe oltre i candidati sono stimate per scelta, non per un guasto.
   const degraded = scored.every((s) => s.estimated)
   const reason = degraded ? firstError : undefined
 
-  if (!degraded) writeCache(key, { stops, degraded, reason })
-  return { stops, degraded, reason }
+  // In cache va la misura, non il giudizio: gli orari li rifà chi legge.
+  if (!degraded) writeCache(key, { stops: measured, degraded, reason })
+  return { stops: orderByAvailability(measured), degraded, reason }
 }
 
 /**
