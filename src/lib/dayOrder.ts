@@ -16,9 +16,24 @@ import { parseTime } from './optimize'
 /** Spostamento medio fra due tappe a Londra, per la sola stima. */
 const TRAVEL_GUESS_MIN = 25
 
-const DAY_START_MIN = 9 * 60
+export const DAY_START_MIN = 9 * 60
 
-export function orderByBookings(pois: Poi[]): Poi[] {
+/**
+ * Da che ora comincia davvero una giornata.
+ *
+ * Per oggi è adesso: se sono le 12:15, pianificare una tappa alle 11:00 non
+ * serve a niente. Per gli altri giorni si parte dall'orario canonico,
+ * perché domani mattina è ancora tutta da usare.
+ */
+export function dayStartMinutes(dateISO: string, now = new Date()): number {
+  const today = now.toISOString().slice(0, 10)
+  if (dateISO !== today) return DAY_START_MIN
+
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  return Math.max(DAY_START_MIN, nowMin)
+}
+
+export function orderByBookings(pois: Poi[], startMin = DAY_START_MIN): Poi[] {
   const booked = pois
     .filter((p) => parseTime(p.pinnedTime) != null)
     .sort((a, b) => (parseTime(a.pinnedTime) ?? 0) - (parseTime(b.pinnedTime) ?? 0))
@@ -28,7 +43,7 @@ export function orderByBookings(pois: Poi[]): Poi[] {
 
   const free = pois.filter((p) => parseTime(p.pinnedTime) == null)
   const out: Poi[] = []
-  let clock = DAY_START_MIN
+  let clock = startMin
   let i = 0
 
   for (const anchor of booked) {

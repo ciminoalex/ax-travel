@@ -3,6 +3,7 @@ import type { Poi, Trip } from '../lib/types'
 import { formatTime, optimizeDay } from '../lib/optimize'
 import { describeError, enrichPlaces, hasApiKey, reorderDay } from '../lib/ai'
 import { areaLabel } from '../lib/split'
+import { dayStartMinutes, DAY_START_MIN } from '../lib/dayOrder'
 
 type Props = {
   trip: Trip
@@ -51,16 +52,24 @@ export default function DayPlan(props: Props) {
     setBusy({ kind: 'optimize', done: 0, total: 1, step: 'Calcolo i tempi tra le tappe…' })
     setNotice(null)
     try {
+      // Se la giornata è oggi si riparte da adesso: proporre le 11:00
+      // quando sono le 12:15 non serve a niente.
+      const startMin = dayStartMinutes(trip.days[dayIndex]?.date ?? '')
+
       const { orderedIds, degraded, skipped, schedule } = await optimizeDay(
         pending,
         trip.hotel,
         trip.walkPenalty,
+        startMin,
         (done, total) =>
           setBusy({ kind: 'optimize', done, total, step: 'Calcolo i tempi tra le tappe…' }),
       )
 
       let finalIds = orderedIds
       const lines = ['Giro riordinato per ridurre tempi e camminata.']
+      if (startMin > DAY_START_MIN) {
+        lines.push(`Pianificato a partire da adesso, le ${formatTime(startMin)}.`)
+      }
 
       // L'AI rifinisce un ordine già valido: se la sua risposta non è una
       // permutazione esatta, teniamo quello calcolato.

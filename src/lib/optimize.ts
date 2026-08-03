@@ -29,9 +29,6 @@ export type OptimizeResult = {
   schedule: ScheduleEntry[]
 }
 
-/** Ora in cui si presume inizi la giornata, se non c'è una prenotazione prima. */
-const DAY_START_MIN = 9 * 60
-
 /** Prima di quest'ora non si parte, qualunque cosa dica la prenotazione. */
 const EARLIEST_START_MIN = 7 * 60
 
@@ -62,6 +59,8 @@ export async function optimizeDay(
   pois: Poi[],
   start: { lat: number; lng: number } | null,
   walkPenalty: number,
+  /** Da che ora parte la giornata: per oggi è l'ora attuale. */
+  startMin: number,
   onProgress?: (done: number, total: number) => void,
 ): Promise<OptimizeResult> {
   if (pois.length <= 2) {
@@ -87,13 +86,13 @@ export async function optimizeDay(
   // cronologico, e nessuna ottimizzazione del percorso può scavalcarle.
   const anchors = anchorOrder(nodes)
 
-  let order = nearestNeighbour(matrix, minutes, nodes, nodes.length, anchors)
+  let order = nearestNeighbour(matrix, minutes, nodes, nodes.length, anchors, startMin)
 
   // Un percorso più corto che fa saltare una prenotazione non è un
   // miglioramento: si accetta solo se le prenotazioni non ci rimettono.
-  let currentLateness = lateness(buildSchedule(order, nodes, minutes))
+  let currentLateness = lateness(buildSchedule(order, nodes, minutes, startMin))
   order = twoOpt(order, matrix, anchors, (candidate) => {
-    const candidateLateness = lateness(buildSchedule(candidate, nodes, minutes))
+    const candidateLateness = lateness(buildSchedule(candidate, nodes, minutes, startMin))
     if (!noWorse(candidateLateness, currentLateness)) return false
     currentLateness = candidateLateness
     return true
@@ -104,7 +103,7 @@ export async function optimizeDay(
     orderedIds: [...order.slice(1).map((i) => nodes[i].id), ...tail.map((p) => p.id)],
     degraded,
     skipped: tail.length,
-    schedule: buildSchedule(order, nodes, minutes),
+    schedule: buildSchedule(order, nodes, minutes, startMin),
   }
 }
 
@@ -119,18 +118,20 @@ function buildSchedule(
   order: number[],
   nodes: { id: string; durationMin?: number; pinnedTime?: string }[],
   minutes: number[][],
+  startMin: number,
 ): ScheduleEntry[] {
   const stops = order.slice(1)
   if (stops.length === 0) return []
 
   // Se la prima tappa è già una prenotazione si può anticipare la sveglia,
-  // ma entro limiti umani: una prenotazione irraggiungibile va segnalata
-  // come tale, non "risolta" facendoti partire alle quattro del mattino.
-  let clock = DAY_START_MIN
+  // ma entro limiti umani — e mai prima di adesso, se la giornata è oggi:
+  // il tempo già passato non si recupera.
+  let clock = startMin
   const firstBooked = parseTime(nodes[stops[0]].pinnedTime)
   if (firstBooked != null) {
     const travel = minutes[order[0]][stops[0]] ?? 0
-    clock = Math.max(EARLIEST_START_MIN, Math.min(clock, firstBooked - travel))
+    const earliest = Math.max(EARLIEST_START_MIN, startMin)
+    clock = Math.max(earliest, Math.min(clock, firstBooked - travel))
   }
 
   const out: ScheduleEntry[] = []
@@ -270,13 +271,14 @@ function nearestNeighbour(
   nodes: { durationMin?: number; pinnedTime?: string }[],
   n: number,
   anchors: number[],
+  startMin: number,
 ): number[] {
   const remaining = new Set<number>()
   for (let i = 1; i < n; i++) remaining.add(i)
 
   const order = [0]
   let current = 0
-  let clock = DAY_START_MIN
+  let clock = startMin
 
   while (remaining.size > 0) {
     const nextAnchor = anchors.find((i) => remaining.has(i))

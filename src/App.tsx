@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Poi, Trip } from './lib/types'
 import { loadTrip, newId, poisOfDay, saveTrip, todayISO } from './lib/store'
 import { splitByArea } from './lib/split'
-import { orderByBookings } from './lib/dayOrder'
+import { dayStartMinutes, orderByBookings } from './lib/dayOrder'
 import Now from './screens/Now'
 import DayPlan from './screens/DayPlan'
 import AddPoi from './screens/AddPoi'
@@ -146,7 +146,7 @@ export default function App() {
       // La giornata si riordina subito attorno alla nuova prenotazione:
       // vederla finire in fondo e doverla spostare a mano sarebbe assurdo.
       const dayPois = days[target].poiIds.map((id) => pois[id]).filter(Boolean)
-      days[target].poiIds = orderByBookings(dayPois).map((p) => p.id)
+      days[target].poiIds = orderByBookings(dayPois, dayStartMinutes(date)).map((p) => p.id)
 
       return { ...t, days, pois }
     })
@@ -275,7 +275,11 @@ export default function App() {
           ...(i === 0 ? visited.map((p) => p.id) : []),
           // Le prenotazioni vanno collocate all'ora giusta, non messe in
           // testa: una visita delle 15:30 non è la prima tappa del mattino.
-          ...orderByBookings([...pinnedByDay[i], ...(groups[i] ?? [])]).map((p) => p.id),
+          // E se la giornata è oggi, si parte dall'ora attuale.
+          ...orderByBookings(
+            [...pinnedByDay[i], ...(groups[i] ?? [])],
+            dayStartMinutes(date),
+          ).map((p) => p.id),
         ],
       }))
 
