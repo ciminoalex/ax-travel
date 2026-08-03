@@ -11,7 +11,12 @@ const CANDIDATES = 4
 
 const CACHE_TTL_MS = 5 * 60 * 1000
 
-type CacheEntry = { at: number; stops: ScoredStop[] }
+/**
+ * L'esito va memorizzato, non ridedotto: le tappe oltre le prime CANDIDATES
+ * sono sempre `estimated` perché non le interroghiamo affatto, quindi
+ * ricalcolare "è degradato?" guardando le tappe in cache dava sempre sì.
+ */
+type CacheEntry = { at: number; stops: ScoredStop[]; degraded: boolean; reason?: string }
 
 /**
  * Riaprire l'app tre volte in due minuti non deve valere tre giri di
@@ -23,21 +28,21 @@ function cacheKey(pos: LatLng, pois: Poi[], walkPenalty: number): string {
   return `ax-travel:next:${coarse(pos)}:${walkPenalty}:${ids}`
 }
 
-function readCache(key: string): ScoredStop[] | null {
+function readCache(key: string): CacheEntry | null {
   try {
     const raw = sessionStorage.getItem(key)
     if (!raw) return null
     const entry = JSON.parse(raw) as CacheEntry
     if (Date.now() - entry.at > CACHE_TTL_MS) return null
-    return entry.stops
+    return entry
   } catch {
     return null
   }
 }
 
-function writeCache(key: string, stops: ScoredStop[]): void {
+function writeCache(key: string, entry: Omit<CacheEntry, 'at'>): void {
   try {
-    sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), stops } satisfies CacheEntry))
+    sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), ...entry } satisfies CacheEntry))
   } catch {
     // Cache piena: non è un errore che debba interrompere il viaggio.
   }
@@ -74,7 +79,9 @@ export async function computeNextStops(
 
   const key = cacheKey(pos, pending, walkPenalty)
   const cached = readCache(key)
-  if (cached) return { stops: cached, degraded: cached.some((s) => s.estimated) }
+  if (cached) {
+    return { stops: cached.stops, degraded: cached.degraded, reason: cached.reason }
+  }
 
   const byDistance = pending
     .map((poi) => ({ poi, straightLineM: haversineM(pos, poi) }))
@@ -117,10 +124,14 @@ export async function computeNextStops(
   )
 
   const stops = [...scored, ...estimated].sort((a, b) => a.cost - b.cost)
-  const degraded = scored.every((s) => s.estimated)
 
-  if (!degraded) writeCache(key, stops)
-  return { stops, degraded, reason: degraded ? firstError : undefined }
+  // Degradato solo se NESSUNO dei candidati interrogati ha risposto. Le
+  // tappe oltre i candidati sono stimate per scelta, non per un guasto.
+  const degraded = scored.every((s) => s.estimated)
+  const reason = degraded ? firstError : undefined
+
+  if (!degraded) writeCache(key, { stops, degraded, reason })
+  return { stops, degraded, reason }
 }
 
 /**
