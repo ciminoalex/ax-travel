@@ -491,7 +491,10 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden">
+    // h-full e non h-[100dvh]: l'altezza la fissa #root, ancorato a un
+    // body che non può scorrere. Su iOS `dvh` cresce quando la barra di
+    // Safari si ritrae, e l'app diventava più alta della finestra.
+    <div className="flex h-full flex-col overflow-hidden">
       <main className="flex-1 overflow-y-auto overscroll-contain pb-4">
         {tab === 'now' && (
           <Now

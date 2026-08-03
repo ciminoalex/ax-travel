@@ -3,6 +3,20 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * Il documento non scorre mai: scorre solo il contenuto dentro l'app.
+   *
+   * Senza questo, su iOS Safari basta una schermata con poco contenuto —
+   * una giornata vuota — perché il gesto non trovi nulla da scorrere
+   * dentro l'app e trascini l'intera pagina: la tab bar se ne va verso
+   * l'alto e resta lì. `100dvh` da solo non basta, perché cambia valore
+   * mentre la barra di Safari si ritrae.
+   */
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
   html {
     /* Evita lo zoom involontario al tap sugli input in iOS Safari. */
     -webkit-text-size-adjust: 100%;
@@ -10,7 +24,10 @@
   body {
     @apply bg-paper text-ink antialiased;
     /* Niente pull-to-refresh accidentale mentre scorri l'itinerario. */
-    overscroll-behavior-y: contain;
+    overscroll-behavior-y: none;
+  }
+  #root {
+    height: 100%;
   }
   /* Target tap comodi anche camminando, con una mano sola. */
   button {
