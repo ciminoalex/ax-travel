@@ -81,9 +81,18 @@ function nearestIndex(p: Point, centroids: Point[]): number {
 }
 
 /**
+ * Quanto può allontanarsi una tappa dal proprio gruppo pur di pareggiare i
+ * numeri. Oltre questa soglia il pareggio non vale il viaggio: meglio una
+ * giornata da cinque tappe vicine che una da quattro con una dall'altra
+ * parte della città.
+ */
+const MAX_DETOUR_M = 2000
+
+/**
  * Sposta le tappe dai giorni troppo pieni a quelli troppo vuoti, scegliendo
- * ogni volta quella che costa meno spostare: la più vicina al centro del
- * giorno che la riceve.
+ * ogni volta quella che ci perde meno: non la più vicina alla destinazione
+ * in assoluto, ma quella per cui il trasferimento è il minor peggioramento
+ * rispetto a dove si trova già.
  */
 function balance(clusters: Poi[][], centroids: Point[]): Poi[][] {
   const total = clusters.reduce((s, c) => s + c.length, 0)
@@ -97,15 +106,21 @@ function balance(clusters: Poi[][], centroids: Point[]): Poi[][] {
     const to = out.reduce((bi, c, i) => (c.length < out[bi].length ? i : bi), 0)
     if (out[to].length >= maxSize) break
 
-    let bestIdx = 0
-    let bestDist = Infinity
+    let bestIdx = -1
+    let bestPenalty = Infinity
     out[from].forEach((p, i) => {
-      const d = haversineM(p, centroids[to])
-      if (d < bestDist) {
-        bestDist = d
+      // Il costo vero non è la distanza dalla destinazione, ma quanto ci
+      // rimette la tappa lasciando il gruppo a cui appartiene.
+      const penalty = haversineM(p, centroids[to]) - haversineM(p, centroids[from])
+      if (penalty < bestPenalty) {
+        bestPenalty = penalty
         bestIdx = i
       }
     })
+
+    // Nessuno può traslocare senza rimetterci troppo: il giorno resta
+    // più affollato, ma compatto.
+    if (bestIdx === -1 || bestPenalty > MAX_DETOUR_M) break
 
     out[to].push(out[from].splice(bestIdx, 1)[0])
   }

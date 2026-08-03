@@ -4,6 +4,7 @@ import { exportTrip, importTrip, newId } from '../lib/store'
 import { searchPlaces, type PlaceHit } from '../lib/photon'
 import { describeKind } from '../lib/kinds'
 import { clearApiKey, hasApiKey, saveApiKey, testApiKey } from '../lib/ai'
+import { runDiagnostics, type Check } from '../lib/diagnostics'
 
 type Props = {
   trip: Trip
@@ -18,8 +19,56 @@ export default function Setup({ trip, setTrip }: Props) {
       <WalkPenaltySection trip={trip} setTrip={setTrip} />
       <AiKeySection />
       <BackupSection trip={trip} setTrip={setTrip} />
+      <DiagnosticsSection />
       <VersionSection />
     </div>
+  )
+}
+
+function DiagnosticsSection() {
+  const [checks, setChecks] = useState<Check[] | null>(null)
+  const [running, setRunning] = useState(false)
+
+  async function run() {
+    setRunning(true)
+    setChecks(await runDiagnostics())
+    setRunning(false)
+  }
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+        Diagnostica
+      </h2>
+      <p className="mt-1 text-xs text-slate-500">
+        Se i tempi coi mezzi non compaiono e l'app ripiega sulla distanza in linea
+        d'aria, questo dice da dove viene il problema.
+      </p>
+
+      <button
+        onClick={() => void run()}
+        disabled={running}
+        className="mt-2 w-full rounded-2xl bg-slate-800 py-3 font-medium active:bg-slate-700 disabled:opacity-50"
+      >
+        {running ? 'Provo…' : 'Prova le connessioni'}
+      </button>
+
+      {checks && (
+        <ul className="mt-2 space-y-1.5">
+          {checks.map((c) => (
+            <li key={c.name} className="rounded-xl bg-slate-900 px-3 py-2 ring-1 ring-slate-800">
+              <p className="text-sm">
+                <span className={c.ok ? 'text-emerald-400' : 'text-rose-400'}>
+                  {c.ok ? '●' : '●'}
+                </span>{' '}
+                {c.name}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">{c.detail}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 

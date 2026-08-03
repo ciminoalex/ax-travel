@@ -47,6 +47,8 @@ export type NextStopsResult = {
   stops: ScoredStop[]
   /** true se TfL non ha risposto e stiamo ordinando per distanza in linea d'aria. */
   degraded: boolean
+  /** Perché è degradato: senza, il ripiego sembra un capriccio. */
+  reason?: string
 }
 
 /**
@@ -81,11 +83,16 @@ export async function computeNextStops(
   const candidates = byDistance.slice(0, CANDIDATES)
   const rest = byDistance.slice(CANDIDATES)
 
+  let firstError: string | undefined
+
   const scored = await Promise.all(
     candidates.map(async ({ poi, straightLineM }): Promise<ScoredStop> => {
       try {
         const journey = await bestJourney(pos, poi, walkPenalty, signal)
-        if (!journey) return estimate(poi, straightLineM, walkPenalty)
+        if (!journey) {
+          firstError ??= 'TfL non ha proposto nessun percorso'
+          return estimate(poi, straightLineM, walkPenalty)
+        }
         return {
           poi,
           journey,
@@ -93,10 +100,11 @@ export async function computeNextStops(
           estimated: false,
           straightLineM,
         }
-      } catch {
+      } catch (e) {
         // Qualunque motivo — rete, scadenza, annullamento — la tappa resta
         // proponibile con una stima. Meglio un dato approssimato che una
-        // schermata che non si sblocca.
+        // schermata che non si sblocca; ma il motivo va detto.
+        firstError ??= (e as Error)?.message || 'errore sconosciuto'
         return estimate(poi, straightLineM, walkPenalty)
       }
     }),
@@ -112,7 +120,7 @@ export async function computeNextStops(
   const degraded = scored.every((s) => s.estimated)
 
   if (!degraded) writeCache(key, stops)
-  return { stops, degraded }
+  return { stops, degraded, reason: degraded ? firstError : undefined }
 }
 
 /**

@@ -31,10 +31,33 @@ export class TflError extends Error {}
 /**
  * Unisce l'annullamento del chiamante a una scadenza propria, così una
  * richiesta che non torna non blocca l'interfaccia a tempo indeterminato.
+ *
+ * Costruito su AbortController invece che su AbortSignal.any/timeout:
+ * quelle due arrivano solo con Safari 17.4 e 16, e su un iPhone più
+ * indietro lanciano un errore che fa fallire *ogni* richiesta — l'app
+ * ripiegherebbe sempre sulla distanza in linea d'aria senza dire perché.
  */
 export function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
-  const timeout = AbortSignal.timeout(ms)
-  return signal ? AbortSignal.any([signal, timeout]) : timeout
+  const ctrl = new AbortController()
+
+  const timer = setTimeout(() => {
+    ctrl.abort(new DOMException('Richiesta scaduta', 'TimeoutError'))
+  }, ms)
+
+  const forward = () => {
+    clearTimeout(timer)
+    ctrl.abort(signal?.reason)
+  }
+
+  if (signal) {
+    if (signal.aborted) forward()
+    else signal.addEventListener('abort', forward, { once: true })
+  }
+
+  // Il timer non serve più una volta che la richiesta si è conclusa.
+  ctrl.signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
+
+  return ctrl.signal
 }
 
 /**
@@ -58,16 +81,21 @@ export async function fetchJourneys(
   let res: Response
   try {
     // Senza scadenza una richiesta lenta resta appesa per minuti e blocca
-    // la schermata: meglio rinunciare e ripiegare sulla stima.
-    res = await fetch(url, { signal: withTimeout(opts.signal, 9000) })
+    // la schermata. 15s perché in roaming la rete può essere molto più
+    // lenta che sotto wifi.
+    res = await fetch(url, { signal: withTimeout(opts.signal, 15000) })
   } catch (e) {
     if (opts.signal?.aborted) throw e
-    throw new TflError('Rete non raggiungibile')
+    const name = (e as Error)?.name
+    throw new TflError(
+      name === 'TimeoutError' ? 'TfL non ha risposto in tempo' : 'Rete non raggiungibile',
+    )
   }
 
   if (!res.ok) {
-    // 300 = TfL non ha saputo risolvere origine o destinazione.
-    throw new TflError(res.status === 300 ? 'Luogo ambiguo per TfL' : `TfL HTTP ${res.status}`)
+    if (res.status === 300) throw new TflError('Luogo ambiguo per TfL')
+    if (res.status === 429) throw new TflError('Troppe richieste a TfL: riprova fra un minuto')
+    throw new TflError(`TfL ha risposto ${res.status}`)
   }
 
   const data = (await res.json()) as TflResponse

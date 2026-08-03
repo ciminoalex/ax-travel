@@ -15,7 +15,14 @@ type State =
   | { phase: 'locating' }
   | { phase: 'routing' }
   | { phase: 'error'; message: string }
-  | { phase: 'ready'; pos: LatLng; stops: ScoredStop[]; degraded: boolean; fromHotel: boolean }
+  | {
+      phase: 'ready'
+      pos: LatLng
+      stops: ScoredStop[]
+      degraded: boolean
+      reason?: string
+      fromHotel: boolean
+    }
 
 export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   const [state, setState] = useState<State>({ phase: 'locating' })
@@ -26,8 +33,8 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
     async (pos: LatLng, fromHotel: boolean) => {
       setState({ phase: 'routing' })
       try {
-        const { stops, degraded } = await computeNextStops(pos, dayPois, trip.walkPenalty)
-        setState({ phase: 'ready', pos, stops, degraded, fromHotel })
+        const { stops, degraded, reason } = await computeNextStops(pos, dayPois, trip.walkPenalty)
+        setState({ phase: 'ready', pos, stops, degraded, reason, fromHotel })
       } catch (e) {
         setState({ phase: 'error', message: (e as Error).message })
       }
@@ -130,9 +137,12 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   return (
     <Screen>
       {state.degraded && (
-        <p className="mb-3 rounded-lg bg-amber-950/50 px-3 py-2 text-xs text-amber-200">
-          Tempi non disponibili — ordino per distanza in linea d'aria.
-        </p>
+        <div className="mb-3 rounded-lg bg-amber-950/50 px-3 py-2">
+          <p className="text-xs text-amber-200">
+            Tempi non disponibili — ordino per distanza in linea d'aria.
+          </p>
+          {state.reason && <p className="mt-0.5 text-xs text-amber-200/60">{state.reason}</p>}
+        </div>
       )}
       {state.fromHotel && (
         <p className="mb-3 rounded-lg bg-slate-800/70 px-3 py-2 text-xs text-slate-300">
