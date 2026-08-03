@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { Poi, ScoredStop, Trip } from '../lib/types'
+import type { Journey, Poi, ScoredStop, Trip } from '../lib/types'
+import { bestJourney } from '../lib/journeyCost'
 import {
   formatDistance,
   getCurrentPosition,
@@ -82,6 +83,8 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
             Aggiungi un posto
           </button>
         </div>
+        {/* Finite le tappe, il rientro è l'unica cosa che serve ancora. */}
+        {trip.hotel && <HomeRoute hotel={trip.hotel} walkPenalty={trip.walkPenalty} />}
       </Screen>
     )
   }
@@ -189,6 +192,10 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
       >
         Ricalcola da dove sono ora
       </button>
+
+      {trip.hotel && (
+        <HomeRoute hotel={trip.hotel} pos={state.pos} walkPenalty={trip.walkPenalty} />
+      )}
     </Screen>
   )
 }
@@ -313,6 +320,109 @@ function DegradedBanner({ reason }: { reason?: string }) {
             })}
           </li>
         </ul>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Il rientro in albergo.
+ *
+ * Serve soprattutto quando le tappe sono finite — cioè quando il resto
+ * della schermata non ha più niente da dire — quindi vive per conto suo:
+ * si prende la posizione da sé e compare in ogni stato, purché l'alloggio
+ * sia impostato.
+ */
+function HomeRoute({ hotel, pos, walkPenalty }: { hotel: Poi; pos?: LatLng; walkPenalty: number }) {
+  type State =
+    | { phase: 'idle' }
+    | { phase: 'working' }
+    | { phase: 'done'; from: LatLng; journey: Journey | null }
+    | { phase: 'error'; message: string }
+
+  const [state, setState] = useState<State>({ phase: 'idle' })
+
+  async function go() {
+    setState({ phase: 'working' })
+    try {
+      const from = pos ?? (await getCurrentPosition())
+      const journey = await bestJourney(from, hotel, walkPenalty)
+      setState({ phase: 'done', from, journey })
+    } catch (e) {
+      setState({ phase: 'error', message: (e as Error).message })
+    }
+  }
+
+  if (state.phase === 'done') {
+    const { journey, from } = state
+    return (
+      <section className="mt-6 rounded-2xl bg-slate-900 p-4 ring-1 ring-slate-800">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Rientro in albergo
+        </p>
+        <p className="mt-0.5 font-medium">🏨 {hotel.name}</p>
+
+        {journey ? (
+          <>
+            <div className="mt-3 flex items-end gap-6">
+              <div>
+                <p className="text-3xl font-bold tabular-nums">{journey.durationMin}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400">minuti</p>
+              </div>
+              <div>
+                <p className="text-3xl font-bold tabular-nums text-sky-300">
+                  🚶 {journey.walkingMin}
+                </p>
+                <p className="text-xs uppercase tracking-wide text-slate-400">a piedi</p>
+              </div>
+            </div>
+            <ol className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-slate-300">
+              {journey.legs.map((l, i) => (
+                <li key={i} className="flex items-center gap-1.5">
+                  {i > 0 && <span className="text-slate-600">→</span>}
+                  <span>
+                    {modeIcon(l.mode)} {l.label}
+                    <span className="text-slate-500"> {l.durationMin}′</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-amber-300">
+            TfL non ha proposto percorsi. Apri in Maps per i dettagli.
+          </p>
+        )}
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <button
+            onClick={() => openMaps(mapsTransitUrl(from, hotel))}
+            className="rounded-xl bg-sky-600 py-3 font-semibold active:bg-sky-700"
+          >
+            Apri in Maps
+          </button>
+          <button
+            onClick={() => void go()}
+            className="rounded-xl bg-slate-800 py-3 font-semibold active:bg-slate-700"
+          >
+            Ricalcola
+          </button>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <div className="mt-6">
+      <button
+        onClick={() => void go()}
+        disabled={state.phase === 'working'}
+        className="w-full rounded-2xl border border-slate-700 py-3.5 font-semibold text-slate-200 active:bg-slate-800 disabled:opacity-50"
+      >
+        {state.phase === 'working' ? 'Calcolo il rientro…' : '🏨 Torna in albergo'}
+      </button>
+      {state.phase === 'error' && (
+        <p className="mt-2 text-center text-xs text-amber-400">{state.message}</p>
       )}
     </div>
   )
