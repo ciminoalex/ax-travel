@@ -81,48 +81,70 @@ function nearestIndex(p: Point, centroids: Point[]): number {
 }
 
 /**
- * Quanto può allontanarsi una tappa dal proprio gruppo pur di pareggiare i
- * numeri. Oltre questa soglia il pareggio non vale il viaggio: meglio una
- * giornata da cinque tappe vicine che una da quattro con una dall'altra
- * parte della città.
+ * Quanto può allontanarsi una tappa dal proprio gruppo pur di pareggiare le
+ * giornate. Oltre questa soglia il pareggio non vale il viaggio.
  */
-const MAX_DETOUR_M = 2000
+const MAX_DETOUR_M = 3500
+
+/** Sotto questo scarto le giornate sono già abbastanza pari. */
+const TOLERANCE_MIN = 45
+
+function load(g: Poi[]): number {
+  return g.reduce((s, p) => s + p.durationMin, 0)
+}
 
 /**
- * Sposta le tappe dai giorni troppo pieni a quelli troppo vuoti, scegliendo
- * ogni volta quella che ci perde meno: non la più vicina alla destinazione
- * in assoluto, ma quella per cui il trasferimento è il minor peggioramento
- * rispetto a dove si trova già.
+ * Pareggia le giornate sulle **ore di visita**, non sul numero di tappe:
+ * quattro tappe possono valere due ore o dodici, e a decidere se una
+ * giornata è fattibile è il tempo, non il conteggio.
+ *
+ * A parità di necessità sposta la tappa che ci perde meno — quella per cui
+ * il trasferimento è il minor peggioramento rispetto a dove si trova già.
  */
 function balance(clusters: Poi[][], centroids: Point[]): Poi[][] {
-  const total = clusters.reduce((s, c) => s + c.length, 0)
-  const maxSize = Math.ceil(total / clusters.length)
   const out = clusters.map((c) => [...c])
+  const target = out.reduce((s, g) => s + load(g), 0) / out.length
 
-  for (let guard = 0; guard < 100; guard++) {
-    const from = out.findIndex((c) => c.length > maxSize)
-    if (from === -1) break
+  for (let guard = 0; guard < 200; guard++) {
+    // Dal più carico al meno carico, così il primo tentativo è quello che
+    // migliora di più.
+    const heavy = out.map((_, i) => i).sort((a, b) => load(out[b]) - load(out[a]))
+    const light = out.map((_, i) => i).sort((a, b) => load(out[a]) - load(out[b]))
 
-    const to = out.reduce((bi, c, i) => (c.length < out[bi].length ? i : bi), 0)
-    if (out[to].length >= maxSize) break
+    let moved = false
 
-    let bestIdx = -1
-    let bestPenalty = Infinity
-    out[from].forEach((p, i) => {
-      // Il costo vero non è la distanza dalla destinazione, ma quanto ci
-      // rimette la tappa lasciando il gruppo a cui appartiene.
-      const penalty = haversineM(p, centroids[to]) - haversineM(p, centroids[from])
-      if (penalty < bestPenalty) {
-        bestPenalty = penalty
-        bestIdx = i
+    outer: for (const from of heavy) {
+      if (load(out[from]) <= target + TOLERANCE_MIN) break
+      for (const to of light) {
+        if (to === from) continue
+        if (load(out[to]) >= target - TOLERANCE_MIN) continue
+        if (out[from].length <= 1) continue
+
+        let bestIdx = -1
+        let bestPenalty = Infinity
+        out[from].forEach((p, i) => {
+          // Spostare una tappa più lunga dello squilibrio lo ribalta
+          // soltanto dall'altra parte.
+          if (p.durationMin > load(out[from]) - load(out[to])) return
+          const penalty = haversineM(p, centroids[to]) - haversineM(p, centroids[from])
+          if (penalty < bestPenalty) {
+            bestPenalty = penalty
+            bestIdx = i
+          }
+        })
+
+        // Nessun candidato accettabile per questa coppia: si prova la
+        // successiva, invece di rinunciare al bilanciamento (era il difetto
+        // che lasciava una giornata con otto tappe e le altre con due).
+        if (bestIdx === -1 || bestPenalty > MAX_DETOUR_M) continue
+
+        out[to].push(out[from].splice(bestIdx, 1)[0])
+        moved = true
+        break outer
       }
-    })
+    }
 
-    // Nessuno può traslocare senza rimetterci troppo: il giorno resta
-    // più affollato, ma compatto.
-    if (bestIdx === -1 || bestPenalty > MAX_DETOUR_M) break
-
-    out[to].push(out[from].splice(bestIdx, 1)[0])
+    if (!moved) break
   }
 
   return out

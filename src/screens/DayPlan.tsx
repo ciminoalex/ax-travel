@@ -309,26 +309,45 @@ export default function DayPlan(props: Props) {
   )
 }
 
+/** Oltre questo, una giornata di visite non sta più in piedi. */
+const HEAVY_DAY_MIN = 7 * 60
+
+/** Ore di visita che ci si può ragionevolmente mettere in un giorno. */
+const COMFORTABLE_DAY_MIN = 6 * 60
+
 /** Selettore delle giornate, con distribuzione per zona. */
 function DayTabs({ trip, dayIndex, onSelectDay, onAddDay, onRemoveDay, onSplit }: Props) {
   const [splitting, setSplitting] = useState(false)
+
+  const minutesOf = (poiIds: string[]) =>
+    poiIds.reduce((s, id) => s + (trip.pois[id]?.durationMin ?? 0), 0)
+
   const totalPois = trip.days.reduce((s, d) => s + d.poiIds.length, 0)
+  const totalMin = trip.days.reduce((s, d) => s + minutesOf(d.poiIds), 0)
+  const suggested = Math.max(1, Math.ceil(totalMin / COMFORTABLE_DAY_MIN))
 
   return (
     <div>
       <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {trip.days.map((d, i) => (
-          <button
-            key={i}
-            onClick={() => onSelectDay(i)}
-            className={`shrink-0 rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
-              i === dayIndex ? 'bg-sky-600' : 'bg-slate-900 text-slate-400 active:bg-slate-800'
-            }`}
-          >
-            G{i + 1}
-            <span className="ml-1.5 opacity-70">{d.poiIds.length}</span>
-          </button>
-        ))}
+        {trip.days.map((d, i) => {
+          const min = minutesOf(d.poiIds)
+          const heavy = min > HEAVY_DAY_MIN
+          return (
+            <button
+              key={i}
+              onClick={() => onSelectDay(i)}
+              className={`shrink-0 rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
+                i === dayIndex ? 'bg-sky-600' : 'bg-slate-900 text-slate-400 active:bg-slate-800'
+              }`}
+            >
+              G{i + 1}
+              {/* Le ore, non il conteggio: è il tempo a dire se ci sta. */}
+              <span className={`ml-1.5 ${heavy ? 'text-amber-300' : 'opacity-70'}`}>
+                {formatHours(min)}
+              </span>
+            </button>
+          )
+        })}
         <button
           onClick={onAddDay}
           aria-label="Aggiungi giornata"
@@ -359,20 +378,28 @@ function DayTabs({ trip, dayIndex, onSelectDay, onAddDay, onRemoveDay, onSplit }
       {splitting && (
         <div className="mt-2 rounded-xl bg-slate-900 p-3 ring-1 ring-slate-800">
           <p className="text-xs text-slate-400">
-            Ridistribuisce tutte le {totalPois} tappe raggruppandole per zona, così ogni
-            giornata resta in un'area sola.
+            Ridistribuisce le {totalPois} tappe per zona e pareggia le ore, così ogni
+            giornata resta in un'area sola e nessuna diventa impossibile.
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            In tutto {formatHours(totalMin)} di visite: con {suggested}{' '}
+            {suggested === 1 ? 'giorno' : 'giorni'} sono circa{' '}
+            {formatHours(Math.round(totalMin / suggested))} al giorno.
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {[2, 3, 4, 5].map((n) => (
+            {[2, 3, 4, 5, 6].map((n) => (
               <button
                 key={n}
                 onClick={() => {
                   onSplit(n)
                   setSplitting(false)
                 }}
-                className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold active:bg-sky-700"
+                className={`rounded-lg px-3 py-2 text-xs font-semibold active:bg-sky-700 ${
+                  n === suggested ? 'bg-sky-600' : 'bg-slate-800 text-slate-300'
+                }`}
               >
                 {n} giorni
+                {n === suggested && ' ·  consigliato'}
               </button>
             ))}
           </div>
