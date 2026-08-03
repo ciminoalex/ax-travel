@@ -3,6 +3,7 @@ import type { Poi, ScoredStop, Trip } from '../lib/types'
 import { formatDistance, getCurrentPosition, mapsTransitUrl, type LatLng } from '../lib/geo'
 import { computeNextStops } from '../lib/nextStop'
 import { modeIcon } from '../lib/tfl'
+import { runDiagnostics, type Check } from '../lib/diagnostics'
 
 type Props = {
   trip: Trip
@@ -136,14 +137,7 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
 
   return (
     <Screen>
-      {state.degraded && (
-        <div className="mb-3 rounded-lg bg-amber-950/50 px-3 py-2">
-          <p className="text-xs text-amber-200">
-            Tempi non disponibili — ordino per distanza in linea d'aria.
-          </p>
-          {state.reason && <p className="mt-0.5 text-xs text-amber-200/60">{state.reason}</p>}
-        </div>
-      )}
+      {state.degraded && <DegradedBanner reason={state.reason} />}
       {state.fromHotel && (
         <p className="mb-3 rounded-lg bg-slate-800/70 px-3 py-2 text-xs text-slate-300">
           Calcolato dall'alloggio, non da dove sei ora.
@@ -264,6 +258,61 @@ function BestCard({
         </button>
       </div>
     </section>
+  )
+}
+
+/**
+ * Il ripiego sulla linea d'aria è progettato per non bloccare il viaggio,
+ * ma nasconde la causa. Qui la causa è a un tap: la diagnostica gira sul
+ * telefono che ha il problema, e un solo screenshot basta per capirlo.
+ */
+function DegradedBanner({ reason }: { reason?: string }) {
+  const [checks, setChecks] = useState<Check[] | null>(null)
+  const [running, setRunning] = useState(false)
+
+  async function diagnose() {
+    setRunning(true)
+    setChecks(await runDiagnostics())
+    setRunning(false)
+  }
+
+  return (
+    <div className="mb-3 rounded-lg bg-amber-950/50 px-3 py-2">
+      <p className="text-xs text-amber-200">
+        Tempi non disponibili — ordino per distanza in linea d'aria.
+      </p>
+      {reason && <p className="mt-0.5 text-xs text-amber-200/70">{reason}</p>}
+
+      {!checks && (
+        <button
+          onClick={() => void diagnose()}
+          disabled={running}
+          className="mt-1.5 text-xs text-amber-300 underline active:text-amber-100 disabled:opacity-50"
+        >
+          {running ? 'Controllo…' : 'Perché?'}
+        </button>
+      )}
+
+      {checks && (
+        <ul className="mt-2 space-y-1">
+          {checks.map((c) => (
+            <li key={c.name} className="text-xs">
+              <span className={c.ok ? 'text-emerald-400' : 'text-rose-400'}>●</span>{' '}
+              <span className="text-amber-100/90">{c.name}</span>
+              <span className="text-amber-100/50"> — {c.detail}</span>
+            </li>
+          ))}
+          <li className="pt-0.5 text-xs text-amber-100/40">
+            versione del {new Date(__BUILD_TIME__).toLocaleString('it-IT', {
+              day: 'numeric',
+              month: 'short',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </li>
+        </ul>
+      )}
+    </div>
   )
 }
 
