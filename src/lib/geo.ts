@@ -23,6 +23,33 @@ export function mapsTransitUrl(from: LatLng, to: LatLng): string {
   return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=transit`
 }
 
+/** L'app è stata installata sulla home e gira senza barra del browser. */
+function isStandalone(): boolean {
+  return (
+    window.matchMedia?.('(display-mode: standalone)').matches ||
+    (navigator as unknown as { standalone?: boolean }).standalone === true
+  )
+}
+
+/**
+ * Apre Google Maps senza lasciare schede aperte dietro di sé.
+ *
+ * Con `target="_blank"` ogni tap creava una scheda Safari nuova che
+ * restava lì: dopo una decina il browser si impianta e serve un refresh.
+ * Navigare nella stessa scheda lascia intervenire l'universal link — Maps
+ * si apre come app e la pagina resta dov'era, raggiungibile col back.
+ *
+ * Se invece l'app è installata sulla home non c'è nessun back a cui
+ * tornare: lì serve davvero aprire fuori, ma una scheda per volta.
+ */
+export function openMaps(url: string): void {
+  if (isStandalone()) {
+    window.open(url, '_blank', 'noopener,noreferrer')
+    return
+  }
+  window.location.href = url
+}
+
 export function formatDistance(m: number): string {
   return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`
 }

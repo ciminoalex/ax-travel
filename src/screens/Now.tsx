@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Poi, ScoredStop, Trip } from '../lib/types'
-import { formatDistance, getCurrentPosition, mapsTransitUrl, type LatLng } from '../lib/geo'
+import {
+  formatDistance,
+  getCurrentPosition,
+  mapsTransitUrl,
+  openMaps,
+  type LatLng,
+} from '../lib/geo'
 import { computeNextStops } from '../lib/nextStop'
 import { modeIcon } from '../lib/tfl'
 import { runDiagnostics, type Check } from '../lib/diagnostics'
@@ -165,14 +171,12 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
                       : `~${formatDistance(s.straightLineM)} in linea d'aria`}
                   </p>
                 </div>
-                <a
-                  href={mapsTransitUrl(state.pos, s.poi)}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  onClick={() => openMaps(mapsTransitUrl(state.pos, s.poi))}
                   className="ml-3 shrink-0 rounded-lg bg-slate-800 px-3 py-2 text-xs active:bg-slate-700"
                 >
                   Maps
-                </a>
+                </button>
               </li>
             ))}
           </ul>
@@ -242,14 +246,12 @@ function BestCard({
       )}
 
       <div className="mt-6 grid grid-cols-2 gap-3">
-        <a
-          href={mapsTransitUrl(pos, poi)}
-          target="_blank"
-          rel="noreferrer"
+        <button
+          onClick={() => openMaps(mapsTransitUrl(pos, poi))}
           className="rounded-2xl bg-sky-600 py-4 text-center font-semibold active:bg-sky-700"
         >
           Apri in Maps
-        </a>
+        </button>
         <button
           onClick={onVisited}
           className="rounded-2xl bg-slate-800 py-4 font-semibold active:bg-slate-700"
