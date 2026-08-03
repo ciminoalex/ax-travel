@@ -20,6 +20,16 @@ export type ReplanSummary = {
   /** Minuti recuperati accorciando le visite. */
   compressedMin: number
   compressedCount: number
+  /** Di quanti giorni sono state riallineate le giornate (0 se erano giuste). */
+  shiftedDays: number
+  shiftedBookings: number
+}
+
+/** Giorni di scarto fra due date ISO. */
+function daysBetween(from: string, to: string): number {
+  const a = new Date(from + 'T12:00:00').getTime()
+  const b = new Date(to + 'T12:00:00').getTime()
+  return Math.round((b - a) / 86400000)
 }
 import Now from './screens/Now'
 import DayPlan from './screens/DayPlan'
@@ -263,40 +273,62 @@ export default function App() {
    * Le giornate ormai passate non vengono più riempite.
    */
   const replanFromNow = useCallback((): ReplanSummary => {
-    let summary: ReplanSummary = {
+    const empty: ReplanSummary = {
       movedToday: 0,
       remainingDays: 0,
       todayMinutes: 0,
       overflow: 0,
       compressedMin: 0,
       compressedCount: 0,
+      shiftedDays: 0,
+      shiftedBookings: 0,
     }
 
-    setTrip((t) => {
+    // Il piano si calcola qui, sullo stato corrente, e non dentro
+    // l'updater: React può eseguirlo più tardi (o due volte in sviluppo),
+    // e il riepilogo tornerebbe vuoto.
+    const t = trip
+    {
       const today = todayISO()
       const all = t.days.flatMap((d) => d.poiIds.map((id) => t.pois[id])).filter(Boolean)
       const visited = all.filter((p) => p.visitedAt)
       const pending = all.filter((p) => !p.visitedAt)
-      if (pending.length === 0) return t
+      if (pending.length === 0) return empty
 
-      // Solo da oggi in avanti: nei giorni passati non si programma più.
+      // Le giornate ripartono da oggi. Un viaggio le cui date sono rimaste
+      // indietro (o avanti) rispetto a quando lo stai davvero facendo
+      // produce piani per il giorno sbagliato: "G1" pianificato dalle 9 del
+      // mattino mentre sei per strada all'una.
       const futureDays = t.days.filter((d) => d.date >= today)
-      const dates =
-        futureDays.length > 0 ? futureDays.map((d) => d.date) : [today]
+      const dayCount = Math.max(1, futureDays.length || t.days.length)
+      const oldFirst = futureDays[0]?.date ?? t.days[0]?.date ?? today
+      const shift = daysBetween(oldFirst, today)
 
-      const pinned = pending.filter((p) => p.pinnedDate)
-      const free = pending.filter((p) => !p.pinnedDate)
+      const dates = Array.from({ length: dayCount }, (_, i) => addDays(today, i))
+
+      // Le prenotazioni seguono la giornata a cui le hai agganciate: le hai
+      // scelte come "G1", non come "5 agosto".
+      const shifted = new Map<string, string>()
+      if (shift !== 0) {
+        for (const p of pending) {
+          if (p.pinnedDate) shifted.set(p.id, addDays(p.pinnedDate, shift))
+        }
+      }
+      const dateOf = (p: Poi) => shifted.get(p.id) ?? p.pinnedDate
+
+      const pinned = pending.filter((p) => dateOf(p))
+      const free = pending.filter((p) => !dateOf(p))
 
       for (const p of pinned) {
-        while (p.pinnedDate! > dates[dates.length - 1]) {
+        while (dateOf(p)! > dates[dates.length - 1]) {
           dates.push(addDays(dates[dates.length - 1], 1))
         }
       }
 
       // Una prenotazione in un giorno ormai passato non è recuperabile:
       // la si tratta come libera, altrimenti sparisce dal programma.
-      const pinnedByDay = dates.map((d) => pinned.filter((p) => p.pinnedDate === d))
-      const orphaned = pinned.filter((p) => !dates.includes(p.pinnedDate!))
+      const pinnedByDay = dates.map((d) => pinned.filter((p) => dateOf(p) === d))
+      const orphaned = pinned.filter((p) => !dates.includes(dateOf(p)!))
       const toDistribute = [...free, ...orphaned]
 
       const capacity = dates.map((d) => dayCapacityMinutes(d))
@@ -347,13 +379,15 @@ export default function App() {
               .reduce((s, p) => s + p.durationMin, 0)
           : 0
 
-      summary = {
+      const summary: ReplanSummary = {
         movedToday: todayIdx >= 0 ? newDays[todayIdx].poiIds.length - visited.length : 0,
         remainingDays: dates.length,
         todayMinutes: todayLoad,
         overflow: compression.stillOver,
         compressedMin: compression.savedMin,
         compressedCount: compression.affected,
+        shiftedDays: shift,
+        shiftedBookings: shifted.size,
       }
 
       // Le giornate passate restano, ma svuotate di ciò che non è stato fatto.
@@ -364,16 +398,19 @@ export default function App() {
           poiIds: d.poiIds.filter((id) => t.pois[id]?.visitedAt),
         }))
 
-      // Le durate compresse (o ripristinate) vanno salvate.
+      // Le durate compresse (o ripristinate) vanno salvate, insieme alle
+      // date delle prenotazioni traslate col riallineamento.
       const pois = { ...t.pois }
       for (const p of compression.pois) pois[p.id] = p
+      for (const [id, date] of shifted) {
+        if (pois[id]) pois[id] = { ...pois[id], pinnedDate: date }
+      }
 
-      return { ...t, pois, days: [...past, ...newDays] }
-    })
-
-    setDayIndex(0)
-    return summary
-  }, [])
+      setTrip({ ...t, pois, days: [...past, ...newDays] })
+      setDayIndex(0)
+      return summary
+    }
+  }, [trip])
 
   /**
    * Ridistribuisce le tappe del viaggio su N giornate raggruppandole per

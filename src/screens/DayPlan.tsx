@@ -177,6 +177,15 @@ export default function DayPlan(props: Props) {
         : `Programma rifatto su ${summary.remainingDays} giorni.`,
       `Oggi: ${summary.movedToday} ${summary.movedToday === 1 ? 'tappa' : 'tappe'}, ${formatHours(summary.todayMinutes)} di visite.`,
     ]
+    if (summary.shiftedDays !== 0) {
+      const n = Math.abs(summary.shiftedDays)
+      lines.push(
+        `Le giornate erano datate ${n} ${n === 1 ? 'giorno' : 'giorni'} ${summary.shiftedDays < 0 ? 'più avanti' : 'indietro'}: riallineate a partire da oggi.` +
+          (summary.shiftedBookings > 0
+            ? ` Anche ${summary.shiftedBookings} ${summary.shiftedBookings === 1 ? 'prenotazione è stata spostata' : 'prenotazioni sono state spostate'} di conseguenza — controlla che le date corrispondano ai biglietti.`
+            : ''),
+      )
+    }
     if (summary.compressedMin > 0) {
       lines.push(
         `Programma pieno: ho accorciato ${summary.compressedCount} visite di ${formatHours(summary.compressedMin)} in tutto per farle entrare.`,
@@ -512,9 +521,9 @@ function TimeRow({
             onChange={(e) => setDate(e.target.value)}
             className="rounded-lg bg-slate-800 px-2 py-1.5 text-xs text-slate-100 outline-none ring-1 ring-slate-700 focus:ring-sky-600"
           >
-            {trip.days.map((d, i) => (
+            {trip.days.map((d) => (
               <option key={d.date} value={d.date}>
-                G{i + 1} · {shortDate(d.date)}
+                {dayLabel(d.date)} · {shortDate(d.date)}
               </option>
             ))}
           </select>
@@ -591,6 +600,20 @@ function shortDate(iso: string): string {
   })
 }
 
+/**
+ * "oggi" e "domani" invece della data quando è ciò che conta: sono le
+ * uniche due giornate su cui si prendono decisioni con l'orologio in mano.
+ */
+function dayLabel(iso: string): string {
+  const today = new Date().toISOString().slice(0, 10)
+  if (iso === today) return 'oggi'
+  const tomorrow = new Date(new Date(today + 'T12:00:00').getTime() + 86400000)
+    .toISOString()
+    .slice(0, 10)
+  if (iso === tomorrow) return 'domani'
+  return shortDate(iso)
+}
+
 /** Oltre questo, una giornata di visite non sta più in piedi. */
 const HEAVY_DAY_MIN = 7 * 60
 
@@ -622,8 +645,9 @@ function DayTabs({ trip, dayIndex, onSelectDay, onAddDay, onRemoveDay, onSplit }
                 i === dayIndex ? 'bg-sky-600' : 'bg-slate-900 text-slate-400 active:bg-slate-800'
               }`}
             >
-              G{i + 1}
-              {/* Le ore, non il conteggio: è il tempo a dire se ci sta. */}
+              {/* La data, non "G1": nascondere il giorno vero porta a
+                  prenotare per la giornata sbagliata. */}
+              {dayLabel(d.date)}
               <span className={`ml-1.5 ${heavy ? 'text-amber-300' : 'opacity-70'}`}>
                 {formatHours(min)}
               </span>
