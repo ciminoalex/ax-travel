@@ -4,9 +4,25 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/ax-travel/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#FBF7F0" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- Fondo chiaro: le icone di sistema devono restare scure. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+    <!--
+      I font del ridisegno. `display=swap` fa partire l'app con i font di
+      sistema e li sostituisce all'arrivo: in roaming il testo si legge
+      subito, non dopo il download. Il service worker li mette in cache al
+      primo caricamento (vedi runtimeCaching in vite.config.ts), così dal
+      secondo avvio non serve più rete.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
     <title>AX.Travel — Londra</title>
   </head>
   <body>

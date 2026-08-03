@@ -8,7 +8,7 @@
     -webkit-text-size-adjust: 100%;
   }
   body {
-    @apply bg-slate-950 text-slate-100 antialiased;
+    @apply bg-paper text-ink antialiased;
     /* Niente pull-to-refresh accidentale mentre scorri l'itinerario. */
     overscroll-behavior-y: contain;
   }
@@ -16,5 +16,12 @@
   button {
     @apply select-none;
     -webkit-tap-highlight-color: transparent;
+  }
+  /*
+   * I numeri che si leggono a colpo d'occhio — minuti, orari, ore per
+   * giornata — non devono ballare mentre si aggiornano.
+   */
+  .tnum {
+    font-variant-numeric: tabular-nums;
   }
 }

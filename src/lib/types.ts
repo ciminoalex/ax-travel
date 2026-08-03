@@ -40,6 +40,16 @@ export type Poi = {
    */
   suggestedTime?: string
 
+  /**
+   * Minuti di viaggio dalla tappa precedente, dall'ultima ottimizzazione.
+   *
+   * Il dato lo calcolava già `optimizeDay` per costruire gli orari, e
+   * finiva buttato. Conservarlo fa leggere la giornata come una sequenza
+   * — "18 min di viaggio" fra una tappa e l'altra — invece che come un
+   * elenco di nomi con degli orari accanto.
+   */
+  travelFromPrevMin?: number
+
   // Campi riempiti dall'AI in fase B — opzionali, l'app funziona senza.
   category?: string
   /** Orari indicativi dal modello: da mostrare sempre con badge "da verificare". */

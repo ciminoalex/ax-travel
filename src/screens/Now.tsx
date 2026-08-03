@@ -9,8 +9,18 @@ import {
   type LatLng,
 } from '../lib/geo'
 import { computeNextStops } from '../lib/nextStop'
-import { modeIcon } from '../lib/tfl'
 import { runDiagnostics, type Check } from '../lib/diagnostics'
+import JourneyLegs from '../components/JourneyLegs'
+import { BigStat, Button, Card, Notice, ScreenTitle, SectionLabel } from '../components/ui'
+import {
+  IconChevron,
+  IconCheck,
+  IconHome,
+  IconMap,
+  IconPin,
+  IconRefresh,
+  IconWalk,
+} from '../components/Icon'
 
 type Props = {
   trip: Trip
@@ -35,6 +45,7 @@ type State =
 export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   const [state, setState] = useState<State>({ phase: 'locating' })
   const pending = dayPois.filter((p) => !p.visitedAt)
+  const done = dayPois.length - pending.length
 
   /** Calcola le tappe a partire da un punto noto, saltando il GPS. */
   const routeFrom = useCallback(
@@ -69,19 +80,21 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   if (pending.length === 0) {
     return (
       <Screen>
-        <div className="mt-16 text-center">
-          <p className="text-5xl">{dayPois.length === 0 ? '🗺️' : '🎉'}</p>
-          <p className="mt-4 text-lg text-slate-300">
-            {dayPois.length === 0
-              ? 'Nessun posto in programma.'
-              : 'Hai visto tutto quello che avevi in lista.'}
+        <div className="mt-14 flex flex-col items-center text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-moss-mid/10 text-moss-mid">
+            {dayPois.length === 0 ? <IconPin size={28} /> : <IconCheck size={30} />}
+          </div>
+          <p className="mt-5 font-display text-2xl font-semibold tracking-[-0.02em]">
+            {dayPois.length === 0 ? 'Nessun posto in programma' : 'Hai visto tutto'}
           </p>
-          <button
-            onClick={onGoAdd}
-            className="mt-6 rounded-xl bg-sky-600 px-6 py-3 font-semibold active:bg-sky-700"
-          >
+          <p className="mt-1.5 text-[15px] text-soft">
+            {dayPois.length === 0
+              ? 'Aggiungi le prime tappe e il giro si organizza da sé.'
+              : 'Non resta niente in lista per oggi.'}
+          </p>
+          <Button variant="primary" size="lg" onClick={onGoAdd} className="mt-6 px-7">
             Aggiungi un posto
-          </button>
+          </Button>
         </div>
         {/* Finite le tappe, il rientro è l'unica cosa che serve ancora. */}
         {trip.hotel && <HomeRoute hotel={trip.hotel} walkPenalty={trip.walkPenalty} />}
@@ -92,20 +105,19 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   if (state.phase === 'locating' || state.phase === 'routing') {
     return (
       <Screen>
-        <div className="mt-20 text-center text-slate-400">
-          <p className="animate-pulse text-4xl">{state.phase === 'locating' ? '📍' : '🚇'}</p>
-          <p className="mt-3">
+        <div className="mt-24 flex flex-col items-center text-center text-faint">
+          <span className="animate-pulse">
+            {state.phase === 'locating' ? <IconPin size={30} /> : <IconRefresh size={30} />}
+          </span>
+          <p className="mt-3 text-[15px]">
             {state.phase === 'locating' ? 'Cerco dove sei…' : 'Calcolo i tempi coi mezzi…'}
           </p>
           {/* Se il GPS non risponde, l'alloggio è un punto di partenza
               accettabile: meglio un risultato utile che una schermata ferma. */}
           {state.phase === 'locating' && trip.hotel && (
-            <button
-              onClick={() => void routeFrom(trip.hotel!, true)}
-              className="mt-6 rounded-xl border border-slate-700 px-5 py-2.5 text-sm text-slate-300 active:bg-slate-800"
-            >
+            <Button onClick={() => void routeFrom(trip.hotel!, true)} className="mt-6 px-5">
               Parti dall'alloggio
-            </button>
+            </Button>
           )}
         </div>
       </Screen>
@@ -115,28 +127,23 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   if (state.phase === 'error') {
     return (
       <Screen>
-        <div className="mt-16 rounded-2xl border border-amber-800/60 bg-amber-950/40 p-5">
-          <p className="font-semibold text-amber-200">Posizione non disponibile</p>
-          <p className="mt-2 text-sm text-amber-100/80">{state.message}</p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              onClick={() => void refresh()}
-              className="rounded-xl bg-amber-600 px-5 py-2.5 font-semibold active:bg-amber-700"
-            >
+        <div className="mt-10">
+          <Notice tone="warn" title="Posizione non disponibile">
+            <p>{state.message}</p>
+            <p className="pt-1 text-[13px] opacity-70">
+              Su iPhone: Impostazioni → Privacy → Localizzazione → Safari.
+            </p>
+          </Notice>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="primary" onClick={() => void refresh()} className="px-5">
               Riprova
-            </button>
+            </Button>
             {trip.hotel && (
-              <button
-                onClick={() => void routeFrom(trip.hotel!, true)}
-                className="rounded-xl border border-amber-700/60 px-5 py-2.5 font-semibold text-amber-200 active:bg-amber-900/40"
-              >
+              <Button onClick={() => void routeFrom(trip.hotel!, true)} className="px-5">
                 Parti dall'alloggio
-              </button>
+              </Button>
             )}
           </div>
-          <p className="mt-3 text-xs text-amber-100/50">
-            Su iPhone: Impostazioni → Privacy → Localizzazione → Safari.
-          </p>
         </div>
       </Screen>
     )
@@ -146,11 +153,21 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
 
   return (
     <Screen>
-      {state.degraded && <DegradedBanner reason={state.reason} />}
-      {state.fromHotel && (
-        <p className="mb-3 rounded-lg bg-slate-800/70 px-3 py-2 text-xs text-slate-300">
-          Calcolato dall'alloggio, non da dove sei ora.
-        </p>
+      <header className="flex items-baseline justify-between">
+        <ScreenTitle>Prossima tappa</ScreenTitle>
+        <span className="text-[13px] text-faint">
+          {done} di {dayPois.length} fatte
+        </span>
+      </header>
+      <p className="mt-1.5 flex items-center gap-1.5 text-[13px] text-faint">
+        <IconPin size={13} width={2} />
+        {state.fromHotel ? "Calcolato dall'alloggio, non da dove sei" : 'Da dove sei ora'}
+      </p>
+
+      {state.degraded && (
+        <div className="mt-4">
+          <DegradedBanner reason={state.reason} />
+        </div>
       )}
 
       {best && (
@@ -163,29 +180,24 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
       )}
 
       {others.length > 0 && (
-        <section className="mt-6">
-          <h2 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Poi le altre tappe
-          </h2>
-          <ul className="space-y-2">
+        <section className="mt-5">
+          <SectionLabel className="px-1">Poi vicine</SectionLabel>
+          <ul className="mt-2.5 space-y-px">
             {others.map((s) => (
-              <li
-                key={s.poi.id}
-                className="flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3"
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{s.poi.name}</p>
-                  <p className="text-xs text-slate-500">
-                    {s.journey
-                      ? `${s.journey.durationMin} min · 🚶 ${s.journey.walkingMin} min a piedi`
-                      : `~${formatDistance(s.straightLineM)} in linea d'aria`}
-                  </p>
-                </div>
+              <li key={s.poi.id}>
                 <button
                   onClick={() => openMaps(mapsTransitUrl(state.pos, s.poi))}
-                  className="ml-3 shrink-0 rounded-lg bg-slate-800 px-3 py-2 text-xs active:bg-slate-700"
+                  className="flex w-full items-center gap-3 rounded-[4px] bg-ink/[0.035] px-4 py-3 text-left first:rounded-t-2xl last:rounded-b-2xl active:bg-ink/[0.06]"
                 >
-                  Maps
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-base font-semibold">{s.poi.name}</span>
+                    <span className="block text-[13px] text-faint">
+                      {s.journey
+                        ? `${s.journey.durationMin} min · ${s.journey.walkingMin} a piedi`
+                        : `~${formatDistance(s.straightLineM)} in linea d'aria`}
+                    </span>
+                  </span>
+                  <IconChevron size={17} width={2} className="shrink-0 text-fainter" />
                 </button>
               </li>
             ))}
@@ -195,8 +207,9 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
 
       <button
         onClick={() => void refresh()}
-        className="mt-6 w-full rounded-xl border border-slate-800 py-3 text-sm text-slate-400 active:bg-slate-900"
+        className="mt-5 flex w-full items-center justify-center gap-2 py-2 text-[13px] text-faint active:text-ink"
       >
+        <IconRefresh size={14} />
         Ricalcola da dove sono ora
       </button>
 
@@ -221,69 +234,53 @@ function BestCard({
   const { poi, journey } = stop
 
   return (
-    <section className="rounded-3xl bg-gradient-to-b from-sky-900/60 to-slate-900 p-5 ring-1 ring-sky-800/50">
-      <p className="text-xs font-semibold uppercase tracking-wide text-sky-400">Prossima tappa</p>
-      <h1 className="mt-1 text-3xl font-bold leading-tight">{poi.name}</h1>
-      {poi.address && <p className="mt-1 text-sm text-slate-400">{poi.address}</p>}
+    <Card className="mt-4 p-5">
+      <h2 className="font-display text-[31px] font-semibold leading-[1.08] tracking-[-0.02em]">
+        {poi.name}
+      </h2>
+      {poi.address && <p className="mt-1 text-sm text-soft">{poi.address}</p>}
 
       {journey ? (
         <>
-          {/* I minuti a piedi stanno accanto al totale con lo stesso peso
-              visivo: è il numero che decide se ti muovi adesso o dopo. */}
-          <div className="mt-5 flex items-end gap-6">
-            <div>
-              <p className="text-4xl font-bold tabular-nums">{journey.durationMin}</p>
-              <p className="text-xs uppercase tracking-wide text-slate-400">minuti in tutto</p>
-            </div>
-            <div>
-              <p className="text-4xl font-bold tabular-nums text-sky-300">
-                🚶 {journey.walkingMin}
-              </p>
-              <p className="text-xs uppercase tracking-wide text-slate-400">minuti a piedi</p>
-            </div>
+          {/* I due numeri hanno la stessa scala di un titolo: sono ciò che
+              si legge camminando, e decidono insieme se muoversi adesso. */}
+          <div className="mt-5 flex items-stretch gap-[18px]">
+            <BigStat value={journey.durationMin} label="min in tutto" />
+            <div className="w-px bg-ink/10" />
+            <BigStat
+              value={journey.walkingMin}
+              label="min a piedi"
+              icon={<IconWalk size={17} width={1.9} />}
+            />
           </div>
 
-          <Legs journey={journey} className="mt-4 text-sm" />
-          <Alternatives from={pos} to={poi} walkPenalty={walkPenalty} chosen={journey} />
+          <div className="mt-4 border-t border-ink/[0.07] pt-4">
+            <JourneyLegs journey={journey} />
+            <Alternatives from={pos} to={poi} walkPenalty={walkPenalty} chosen={journey} />
+          </div>
         </>
       ) : (
-        <p className="mt-5 text-slate-300">
+        <p className="mt-5 text-[15px] text-soft">
           ~{formatDistance(stop.straightLineM)} in linea d'aria — tempi non disponibili.
         </p>
       )}
 
-      <div className="mt-6 grid grid-cols-2 gap-3">
-        <button
+      <div className="mt-5 flex flex-col gap-2.5">
+        <Button
+          variant="primary"
+          size="lg"
+          block
           onClick={() => openMaps(mapsTransitUrl(pos, poi))}
-          className="rounded-2xl bg-sky-600 py-4 text-center font-semibold active:bg-sky-700"
         >
+          <IconMap size={18} width={2} />
           Apri in Maps
-        </button>
-        <button
-          onClick={onVisited}
-          className="rounded-2xl bg-slate-800 py-4 font-semibold active:bg-slate-700"
-        >
-          Visitato ✓
-        </button>
+        </Button>
+        <Button block onClick={onVisited}>
+          <IconCheck size={16} />
+          Segna come visitato
+        </Button>
       </div>
-    </section>
-  )
-}
-
-/** I mezzi in fila, con i minuti di ogni tratta. */
-function Legs({ journey, className = '' }: { journey: Journey; className?: string }) {
-  return (
-    <ol className={`flex flex-wrap items-center gap-x-1.5 gap-y-1 text-slate-300 ${className}`}>
-      {journey.legs.map((l, i) => (
-        <li key={i} className="flex items-center gap-1.5">
-          {i > 0 && <span className="text-slate-600">→</span>}
-          <span>
-            {modeIcon(l.mode)} {l.label}
-            <span className="text-slate-500"> {l.durationMin}′</span>
-          </span>
-        </li>
-      ))}
-    </ol>
+    </Card>
   )
 }
 
@@ -328,7 +325,7 @@ function Alternatives({
       <button
         onClick={() => void load()}
         disabled={state === 'loading'}
-        className="mt-3 text-xs text-sky-400 underline active:text-sky-200 disabled:opacity-50"
+        className="mt-3 text-[13px] text-terra-link active:text-terra-deep disabled:opacity-50"
       >
         {state === 'loading'
           ? 'Cerco altre strade…'
@@ -343,33 +340,30 @@ function Alternatives({
     j.durationMin === chosen.durationMin && j.walkingMin === chosen.walkingMin
 
   return (
-    <div className="mt-4 rounded-xl bg-slate-950/50 p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Altre strade possibili
-      </p>
+    <div className="mt-4 rounded-2xl bg-ink/[0.035] p-3">
+      <SectionLabel>Altre strade possibili</SectionLabel>
       <ul className="mt-2 space-y-2">
         {options.map((j, i) => (
           <li
             key={i}
-            className={`rounded-lg px-2.5 py-2 ${
-              same(j) ? 'bg-sky-950/60 ring-1 ring-sky-800/60' : 'bg-slate-900/60'
+            className={`rounded-xl px-2.5 py-2 ${
+              same(j) ? 'bg-white ring-1 ring-terra/30' : 'bg-white/60'
             }`}
           >
             <p className="text-sm">
-              <span className="font-semibold tabular-nums">{j.durationMin} min</span>
-              <span className="text-slate-400"> · 🚶 {j.walkingMin} a piedi</span>
-              {same(j) && <span className="text-sky-400"> · scelto</span>}
+              <span className="tnum font-semibold">{j.durationMin} min</span>
+              <span className="text-faint"> · {j.walkingMin} a piedi</span>
+              {same(j) && <span className="font-medium text-terra"> · scelto</span>}
             </p>
-            <Legs journey={j} className="mt-1 text-xs" />
+            <JourneyLegs journey={j} className="mt-1.5" />
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-xs leading-relaxed text-slate-500">
-        L'ordine tiene conto sia della durata sia dei minuti a piedi, che pesano il doppio
-        (il primo qui costa {Math.round(journeyCost(options[0], walkPenalty))} contro{' '}
+      <p className="mt-2.5 text-[13px] leading-relaxed text-faint">
+        L'ordine tiene conto sia della durata sia dei minuti a piedi, che pesano il doppio (il
+        primo costa {Math.round(journeyCost(options[0], walkPenalty))} contro{' '}
         {Math.round(journeyCost(options[options.length - 1], walkPenalty))} dell'ultimo). Google
-        ordina per sola durata, perciò può proporre percorsi diversi — e non pesca dagli stessi
-        dati di TfL.
+        ordina per sola durata, e non pesca dagli stessi dati di TfL.
       </p>
     </div>
   )
@@ -391,33 +385,31 @@ function DegradedBanner({ reason }: { reason?: string }) {
   }
 
   return (
-    <div className="mb-3 rounded-lg bg-amber-950/50 px-3 py-2">
-      <p className="text-xs text-amber-200">
-        Tempi non disponibili — ordino per distanza in linea d'aria.
-      </p>
-      {reason && <p className="mt-0.5 text-xs text-amber-200/70">{reason}</p>}
+    <Notice tone="warn" title="Tempi non disponibili">
+      <p>Ordino per distanza in linea d'aria.</p>
+      {reason && <p className="opacity-70">{reason}</p>}
 
       {!checks && (
         <button
           onClick={() => void diagnose()}
           disabled={running}
-          className="mt-1.5 text-xs text-amber-300 underline active:text-amber-100 disabled:opacity-50"
+          className="underline active:opacity-60 disabled:opacity-50"
         >
           {running ? 'Controllo…' : 'Perché?'}
         </button>
       )}
 
       {checks && (
-        <ul className="mt-2 space-y-1">
+        <ul className="space-y-1 pt-1">
           {checks.map((c) => (
-            <li key={c.name} className="text-xs">
-              <span className={c.ok ? 'text-emerald-400' : 'text-rose-400'}>●</span>{' '}
-              <span className="text-amber-100/90">{c.name}</span>
-              <span className="text-amber-100/50"> — {c.detail}</span>
+            <li key={c.name} className="text-[13px]">
+              <span className={c.ok ? 'text-moss-mid' : 'text-terra'}>●</span> {c.name}
+              <span className="opacity-60"> — {c.detail}</span>
             </li>
           ))}
-          <li className="pt-0.5 text-xs text-amber-100/40">
-            versione del {new Date(__BUILD_TIME__).toLocaleString('it-IT', {
+          <li className="text-[13px] opacity-50">
+            versione del{' '}
+            {new Date(__BUILD_TIME__).toLocaleString('it-IT', {
               day: 'numeric',
               month: 'short',
               hour: '2-digit',
@@ -426,17 +418,18 @@ function DegradedBanner({ reason }: { reason?: string }) {
           </li>
         </ul>
       )}
-    </div>
+    </Notice>
   )
 }
 
 /**
  * Il rientro in albergo.
  *
- * Serve soprattutto quando le tappe sono finite — cioè quando il resto
- * della schermata non ha più niente da dire — quindi vive per conto suo:
- * si prende la posizione da sé e compare in ogni stato, purché l'alloggio
- * sia impostato.
+ * Nel ridisegno non è più un blocco che compete con la prossima tappa: è
+ * una riga a piè di pagina, che si apre solo quando serve. Vive per conto
+ * suo e compare in ogni stato purché l'alloggio sia impostato — serve
+ * soprattutto quando le tappe sono finite, cioè quando il resto della
+ * schermata non ha più niente da dire.
  */
 function HomeRoute({ hotel, pos, walkPenalty }: { hotel: Poi; pos?: LatLng; walkPenalty: number }) {
   type State =
@@ -458,72 +451,45 @@ function HomeRoute({ hotel, pos, walkPenalty }: { hotel: Poi; pos?: LatLng; walk
     }
   }
 
-  if (state.phase === 'done') {
-    const { journey, from } = state
-    return (
-      <section className="mt-6 rounded-2xl bg-slate-900 p-4 ring-1 ring-slate-800">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Rientro in albergo
-        </p>
-        <p className="mt-0.5 font-medium">🏨 {hotel.name}</p>
-
-        {journey ? (
-          <>
-            <div className="mt-3 flex items-end gap-6">
-              <div>
-                <p className="text-3xl font-bold tabular-nums">{journey.durationMin}</p>
-                <p className="text-xs uppercase tracking-wide text-slate-400">minuti</p>
-              </div>
-              <div>
-                <p className="text-3xl font-bold tabular-nums text-sky-300">
-                  🚶 {journey.walkingMin}
-                </p>
-                <p className="text-xs uppercase tracking-wide text-slate-400">a piedi</p>
-              </div>
-            </div>
-            <Legs journey={journey} className="mt-3 text-sm" />
-            <Alternatives from={from} to={hotel} walkPenalty={walkPenalty} chosen={journey} />
-          </>
-        ) : (
-          <p className="mt-2 text-sm text-amber-300">
-            TfL non ha proposto percorsi. Apri in Maps per i dettagli.
-          </p>
-        )}
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <button
-            onClick={() => openMaps(mapsTransitUrl(from, hotel))}
-            className="rounded-xl bg-sky-600 py-3 font-semibold active:bg-sky-700"
-          >
-            Apri in Maps
-          </button>
-          <button
-            onClick={() => void go()}
-            className="rounded-xl bg-slate-800 py-3 font-semibold active:bg-slate-700"
-          >
-            Ricalcola
-          </button>
-        </div>
-      </section>
-    )
-  }
-
   return (
-    <div className="mt-6">
-      <button
-        onClick={() => void go()}
-        disabled={state.phase === 'working'}
-        className="w-full rounded-2xl border border-slate-700 py-3.5 font-semibold text-slate-200 active:bg-slate-800 disabled:opacity-50"
-      >
-        {state.phase === 'working' ? 'Calcolo il rientro…' : '🏨 Torna in albergo'}
-      </button>
-      {state.phase === 'error' && (
-        <p className="mt-2 text-center text-xs text-amber-400">{state.message}</p>
+    <section className="mt-5 border-t border-ink/[0.08] pt-3.5">
+      <div className="flex items-center gap-3">
+        <IconHome size={18} className="shrink-0 text-soft" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] font-semibold">Torna in albergo</p>
+          <p className="truncate text-[13px] text-faint">
+            {state.phase === 'done' && state.journey
+              ? `${state.journey.durationMin} min · ${state.journey.walkingMin} a piedi · ${hotel.name}`
+              : state.phase === 'working'
+                ? 'Calcolo il rientro…'
+                : state.phase === 'error'
+                  ? state.message
+                  : hotel.name}
+          </p>
+        </div>
+        {state.phase === 'done' ? (
+          <Button size="sm" onClick={() => openMaps(mapsTransitUrl(state.from, hotel))}>
+            Maps
+          </Button>
+        ) : (
+          <Button size="sm" disabled={state.phase === 'working'} onClick={() => void go()}>
+            Calcola
+          </Button>
+        )}
+      </div>
+
+      {state.phase === 'done' && state.journey && (
+        <JourneyLegs journey={state.journey} className="mt-3 pl-[30px]" />
       )}
-    </div>
+      {state.phase === 'done' && !state.journey && (
+        <p className="mt-2 pl-[30px] text-[13px] text-amber">
+          TfL non ha proposto percorsi. Apri in Maps per i dettagli.
+        </p>
+      )}
+    </section>
   )
 }
 
 function Screen({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto max-w-lg px-4 pt-6">{children}</div>
+  return <div className="mx-auto max-w-lg px-[18px] pb-6 pt-5">{children}</div>
 }

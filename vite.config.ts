@@ -20,8 +20,8 @@ export default defineConfig({
         name: 'AX.Travel — Londra',
         short_name: 'AX.Travel',
         description: 'Il prossimo posto da vedere, e come arrivarci coi mezzi.',
-        theme_color: '#0f172a',
-        background_color: '#0f172a',
+        theme_color: '#FBF7F0',
+        background_color: '#FBF7F0',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '.',
@@ -48,6 +48,18 @@ export default defineConfig({
             options: {
               cacheName: 'photon',
               expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
+            },
+          },
+          // I font del ridisegno. Sono immutabili e hanno l'hash nell'URL,
+          // quindi CacheFirst: dal secondo avvio non serve più rete, e in
+          // roaming l'app non aspetta Google per disegnare il testo.
+          {
+            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
             },
           },
         ],

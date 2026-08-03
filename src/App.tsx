@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react'
 import type { Poi, Trip } from './lib/types'
 import { loadTrip, newId, poisOfDay, saveTrip, todayISO } from './lib/store'
 import { splitByArea } from './lib/split'
@@ -23,7 +23,21 @@ export type ReplanSummary = {
   /** Di quanti giorni sono state riallineate le giornate (0 se erano giuste). */
   shiftedDays: number
   shiftedBookings: number
+  /** Prenotazioni con orario che il piano rispetta. */
+  bookings: number
+  /** Il piano giorno per giorno, per poterlo leggere prima di applicarlo. */
+  perDay: { date: string; stops: number; minutes: number }[]
 }
+
+/**
+ * Un piano calcolato ma non ancora applicato.
+ *
+ * Prima la ripianificazione applicava e *poi* raccontava cos'era successo:
+ * per giudicarla bisognava già averla subita. Separare il calcolo
+ * dall'applicazione rende il riepilogo una decisione invece di un referto —
+ * e «Lascia com'era» costa un tocco, non un annulla che non esiste.
+ */
+export type ReplanPlan = { summary: ReplanSummary; trip: Trip }
 
 /** Giorni di scarto fra due date ISO. */
 function daysBetween(from: string, to: string): number {
@@ -35,14 +49,17 @@ import Now from './screens/Now'
 import DayPlan from './screens/DayPlan'
 import AddPoi from './screens/AddPoi'
 import Setup from './screens/Setup'
+import { IconCalendar, IconClock, IconGear, IconPlus } from './components/Icon'
 
 export type Tab = 'now' | 'day' | 'add' | 'setup'
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'now', label: 'Ora', icon: '📍' },
-  { id: 'day', label: 'Giornata', icon: '🗓️' },
-  { id: 'add', label: 'Aggiungi', icon: '➕' },
-  { id: 'setup', label: 'Setup', icon: '⚙️' },
+type IconComponent = ComponentType<{ size?: number; width?: number; className?: string }>
+
+const TABS: { id: Tab; label: string; Icon: IconComponent }[] = [
+  { id: 'now', label: 'Ora', Icon: IconClock },
+  { id: 'day', label: 'Giornata', Icon: IconCalendar },
+  { id: 'add', label: 'Aggiungi', Icon: IconPlus },
+  { id: 'setup', label: 'Setup', Icon: IconGear },
 ]
 
 export default function App() {
@@ -272,18 +289,7 @@ export default function App() {
    *
    * Le giornate ormai passate non vengono più riempite.
    */
-  const replanFromNow = useCallback((): ReplanSummary => {
-    const empty: ReplanSummary = {
-      movedToday: 0,
-      remainingDays: 0,
-      todayMinutes: 0,
-      overflow: 0,
-      compressedMin: 0,
-      compressedCount: 0,
-      shiftedDays: 0,
-      shiftedBookings: 0,
-    }
-
+  const computeReplan = useCallback((): ReplanPlan | null => {
     // Il piano si calcola qui, sullo stato corrente, e non dentro
     // l'updater: React può eseguirlo più tardi (o due volte in sviluppo),
     // e il riepilogo tornerebbe vuoto.
@@ -293,7 +299,7 @@ export default function App() {
       const all = t.days.flatMap((d) => d.poiIds.map((id) => t.pois[id])).filter(Boolean)
       const visited = all.filter((p) => p.visitedAt)
       const pending = all.filter((p) => !p.visitedAt)
-      if (pending.length === 0) return empty
+      if (pending.length === 0) return null
 
       // Le giornate ripartono da oggi. Un viaggio le cui date sono rimaste
       // indietro (o avanti) rispetto a quando lo stai davvero facendo
@@ -379,17 +385,6 @@ export default function App() {
               .reduce((s, p) => s + p.durationMin, 0)
           : 0
 
-      const summary: ReplanSummary = {
-        movedToday: todayIdx >= 0 ? newDays[todayIdx].poiIds.length - visited.length : 0,
-        remainingDays: dates.length,
-        todayMinutes: todayLoad,
-        overflow: compression.stillOver,
-        compressedMin: compression.savedMin,
-        compressedCount: compression.affected,
-        shiftedDays: shift,
-        shiftedBookings: shifted.size,
-      }
-
       // Le giornate passate restano, ma svuotate di ciò che non è stato fatto.
       const past = t.days
         .filter((d) => d.date < today)
@@ -406,11 +401,39 @@ export default function App() {
         if (pois[id]) pois[id] = { ...pois[id], pinnedDate: date }
       }
 
-      setTrip({ ...t, pois, days: [...past, ...newDays] })
-      setDayIndex(0)
-      return summary
+      // Il carico giorno per giorno si legge dal piano nuovo, con le durate
+      // già compresse: è quello che l'anteprima deve mostrare.
+      const perDay = newDays.map((d) => {
+        const stops = d.poiIds.map((id) => pois[id]).filter((p) => p && !p.visitedAt)
+        return {
+          date: d.date,
+          stops: stops.length,
+          minutes: stops.reduce((s, p) => s + p.durationMin, 0),
+        }
+      })
+
+      const summary: ReplanSummary = {
+        movedToday: todayIdx >= 0 ? newDays[todayIdx].poiIds.length - visited.length : 0,
+        remainingDays: dates.length,
+        todayMinutes: todayLoad,
+        overflow: compression.stillOver,
+        compressedMin: compression.savedMin,
+        compressedCount: compression.affected,
+        shiftedDays: shift,
+        shiftedBookings: shifted.size,
+        bookings: pending.filter((p) => p.pinnedTime).length,
+        perDay,
+      }
+
+      return { summary, trip: { ...t, pois, days: [...past, ...newDays] } }
     }
   }, [trip])
+
+  /** Rende definitivo un piano che l'utente ha appena letto e accettato. */
+  const applyReplan = useCallback((plan: ReplanPlan) => {
+    setTrip(plan.trip)
+    setDayIndex(0)
+  }, [])
 
   /**
    * Ridistribuisce le tappe del viaggio su N giornate raggruppandole per
@@ -492,7 +515,8 @@ export default function App() {
             onTogglePin={togglePin}
             onSetBooking={setBooking}
             onClearBooking={clearBooking}
-            onReplan={replanFromNow}
+            onComputeReplan={computeReplan}
+            onApplyReplan={applyReplan}
             onRemove={removePoi}
             onReorder={reorder}
             onUpdate={updatePoi}
@@ -504,22 +528,25 @@ export default function App() {
       </main>
 
       <nav
-        className="grid shrink-0 grid-cols-4 border-t border-slate-800 bg-slate-900"
+        className="grid shrink-0 grid-cols-4 border-t border-ink/[0.08] bg-paper/95 backdrop-blur"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`flex flex-col items-center gap-0.5 py-3 text-xs transition-colors ${
-              tab === t.id ? 'text-sky-400' : 'text-slate-500'
-            }`}
-            aria-current={tab === t.id ? 'page' : undefined}
-          >
-            <span className="text-xl leading-none">{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
+        {TABS.map((t) => {
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex flex-col items-center gap-1.5 py-2.5 text-[11px] transition-colors ${
+                active ? 'font-semibold text-terra' : 'text-[#9A9188]'
+              }`}
+              aria-current={active ? 'page' : undefined}
+            >
+              <t.Icon size={22} width={1.8} />
+              {t.label}
+            </button>
+          )
+        })}
       </nav>
     </div>
   )
