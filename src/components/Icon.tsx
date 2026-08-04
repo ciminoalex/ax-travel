@@ -115,6 +115,14 @@ export function IconArrowRight(p: Props) {
   )
 }
 
+export function IconArrowLeft(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M15 5l-7 7 7 7" />
+    </Svg>
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /* Mezzi                                                               */
 /* ------------------------------------------------------------------ */

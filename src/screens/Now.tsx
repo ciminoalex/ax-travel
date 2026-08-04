@@ -13,6 +13,8 @@ import { runDiagnostics, type Check } from '../lib/diagnostics'
 import JourneyLegs from '../components/JourneyLegs'
 import { BigStat, Button, Card, Notice, ScreenTitle, SectionLabel } from '../components/ui'
 import {
+  IconArrowLeft,
+  IconArrowRight,
   IconChevron,
   IconCheck,
   IconHome,
@@ -49,10 +51,33 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   const pending = dayPois.filter((p) => !p.visitedAt)
   const done = dayPois.length - pending.length
 
+  /**
+   * Quale candidato stai guardando. 0 è la prossima tappa vera.
+   *
+   * È solo un modo di guardare la lista: saltare qui non tocca il
+   * programma, non marca niente, non sposta niente. Per togliere davvero
+   * una tappa dalla giornata c'è «Non oggi», che è un gesto diverso con
+   * conseguenze diverse — e nessuno dei due deve fare il lavoro dell'altro
+   * di nascosto.
+   */
+  const [chosen, setChosen] = useState(0)
+
+  /**
+   * Percorsi chiesti a TfL su richiesta.
+   *
+   * I primi candidati hanno già il percorso calcolato; oltre quelli
+   * `journey` è null per scelta, e interrogarli tutti a ogni apertura
+   * costerebbe una raffica di chiamate. Qui si paga solo quello che guardi.
+   */
+  const [onDemand, setOnDemand] = useState<Record<string, Journey | null>>({})
+  const [loadingRoute, setLoadingRoute] = useState(false)
+
   /** Calcola le tappe a partire da un punto noto, saltando il GPS. */
   const routeFrom = useCallback(
     async (pos: LatLng, fromHotel: boolean) => {
       setState({ phase: 'routing' })
+      setChosen(0)
+      setOnDemand({})
       try {
         const { stops, degraded, reason } = await computeNextStops(pos, dayPois, trip.walkPenalty)
         setState({ phase: 'ready', pos, stops, degraded, reason, fromHotel })
@@ -78,6 +103,29 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  /**
+   * Il percorso della tappa che stai guardando, se non ce l'ha già.
+   *
+   * Sta qui e non dentro il ramo 'ready' perché gli hook non possono
+   * vivere dietro un return anticipato: la guardia sulla fase è dentro.
+   */
+  useEffect(() => {
+    if (state.phase !== 'ready') return
+    const stop = state.stops[Math.min(chosen, state.stops.length - 1)]
+    if (!stop || stop.journey || stop.poi.id in onDemand) return
+
+    let cancelled = false
+    setLoadingRoute(true)
+    bestJourney(state.pos, stop.poi, trip.walkPenalty)
+      .then((j) => !cancelled && setOnDemand((prev) => ({ ...prev, [stop.poi.id]: j })))
+      .catch(() => !cancelled && setOnDemand((prev) => ({ ...prev, [stop.poi.id]: null })))
+      .finally(() => !cancelled && setLoadingRoute(false))
+
+    return () => {
+      cancelled = true
+    }
+  }, [state, chosen, onDemand, trip.walkPenalty])
 
   if (pending.length === 0) {
     return (
@@ -151,20 +199,39 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
     )
   }
 
-  const [best, ...others] = state.stops
+  const index = Math.min(chosen, state.stops.length - 1)
+  const current = state.stops[index]
+  // Le altre restano nell'ordine di sempre: la lista è "quelle che non
+  // stai guardando", non una classifica nuova.
+  const others = state.stops
+    .map((stop, i) => ({ stop, i }))
+    .filter(({ i }) => i !== index)
+  const currentJourney = current?.journey ?? onDemand[current?.poi.id ?? ''] ?? null
+  const viewingAlternative = index > 0
 
   return (
     <Screen>
       <header className="flex items-baseline justify-between">
-        <ScreenTitle>Prossima tappa</ScreenTitle>
+        <ScreenTitle>{viewingAlternative ? "Un'altra tappa" : 'Prossima tappa'}</ScreenTitle>
         <span className="text-[13px] text-faint">
           {done} di {dayPois.length} fatte
         </span>
       </header>
-      <p className="mt-1.5 flex items-center gap-1.5 text-[13px] text-faint">
-        <IconPin size={13} width={2} />
-        {state.fromHotel ? "Calcolato dall'alloggio, non da dove sei" : 'Da dove sei ora'}
-      </p>
+
+      {viewingAlternative ? (
+        <button
+          onClick={() => setChosen(0)}
+          className="mt-1.5 flex items-center gap-1.5 text-[13px] text-terra-link active:text-terra-deep"
+        >
+          <IconArrowLeft size={13} width={2} />
+          Invece di {state.stops[0].poi.name}
+        </button>
+      ) : (
+        <p className="mt-1.5 flex items-center gap-1.5 text-[13px] text-faint">
+          <IconPin size={13} width={2} />
+          {state.fromHotel ? "Calcolato dall'alloggio, non da dove sei" : 'Da dove sei ora'}
+        </p>
+      )}
 
       {state.degraded && (
         <div className="mt-4">
@@ -172,23 +239,30 @@ export default function Now({ trip, dayPois, onVisit, onGoAdd }: Props) {
         </div>
       )}
 
-      {best && (
+      {current && (
         <BestCard
-          stop={best}
+          stop={current}
+          journey={currentJourney}
+          loadingRoute={loadingRoute}
           pos={state.pos}
           walkPenalty={trip.walkPenalty}
-          onVisited={() => onVisit(best.poi.id, { visitedAt: new Date().toISOString() })}
+          onVisited={() => onVisit(current.poi.id, { visitedAt: new Date().toISOString() })}
+          onSkip={index + 1 < state.stops.length ? () => setChosen(index + 1) : undefined}
         />
       )}
 
       {others.length > 0 && (
         <section className="mt-5">
-          <SectionLabel className="px-1">Poi vicine</SectionLabel>
+          <SectionLabel className="px-1">
+            {viewingAlternative ? 'Le altre' : 'Poi vicine'}
+          </SectionLabel>
           <ul className="mt-2.5 space-y-px">
-            {others.map((s) => (
+            {others.map(({ stop: s, i }) => (
               <li key={s.poi.id}>
+                {/* Selezionare invece di aprire Maps: prima vedi con che
+                    mezzi ci arrivi, poi decidi. Maps resta nella card. */}
                 <button
-                  onClick={() => openMaps(mapsTransitUrl(state.pos, s.poi))}
+                  onClick={() => setChosen(i)}
                   className={`flex w-full items-center gap-3 rounded-[4px] bg-ink/[0.035] px-4 py-3 text-left first:rounded-t-2xl last:rounded-b-2xl active:bg-ink/[0.06] ${
                     // Non ancora il suo momento: resta in lista, ma non
                     // deve sembrare un invito ad andarci adesso.
@@ -260,16 +334,24 @@ function describeSlack(slackMin: number): string {
 
 function BestCard({
   stop,
+  journey,
+  loadingRoute,
   pos,
   walkPenalty,
   onVisited,
+  onSkip,
 }: {
   stop: ScoredStop
+  /** Il percorso: quello già calcolato, o quello chiesto su richiesta. */
+  journey: Journey | null
+  loadingRoute: boolean
   pos: LatLng
   walkPenalty: number
   onVisited: () => void
+  /** Assente se questa è l'ultima della lista: non c'è più niente dopo. */
+  onSkip?: () => void
 }) {
-  const { poi, journey } = stop
+  const { poi } = stop
 
   return (
     <Card className="mt-4 p-5">
@@ -329,6 +411,8 @@ function BestCard({
             <Alternatives from={pos} to={poi} walkPenalty={walkPenalty} chosen={journey} />
           </div>
         </>
+      ) : loadingRoute ? (
+        <p className="mt-5 animate-pulse text-[15px] text-faint">Calcolo come arrivarci…</p>
       ) : (
         <p className="mt-5 text-[15px] text-soft">
           ~{formatDistance(stop.straightLineM)} in linea d'aria — tempi non disponibili.
@@ -350,6 +434,17 @@ function BestCard({
           Segna come visitato
         </Button>
       </div>
+
+      {/* Terziario di proposito: cambia solo cosa guardi, non il programma. */}
+      {onSkip && (
+        <button
+          onClick={onSkip}
+          className="mt-3 flex w-full items-center justify-center gap-1.5 py-1 text-[13px] text-faint active:text-ink"
+        >
+          Salta, fammi vedere la prossima
+          <IconArrowRight size={12} width={2.4} />
+        </button>
+      )}
     </Card>
   )
 }
